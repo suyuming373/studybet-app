@@ -1,0 +1,136 @@
+# 賭讀 / StudyBet — Frontend (Part B)
+
+A static PWA made of plain HTML, CSS and ES modules. There is no build step. It lives in the **`docs/`** folder, so GitHub Pages can publish it straight from the repository.
+
+| File | Purpose |
+|---|---|
+| `index.html`, `app.css`, `app.js` | App shell, styles, entry point (boot, error boundary, test hooks) |
+| `config.js` | **Your** Supabase values (empty placeholders until you fill them in) |
+| `src/*.js` | Modules: `store` (data, offline queue, Realtime), `home`, `sheets`, `pairing`, `fx` (sound/haptics/confetti), `mock` (`?mock=1` fake backend), … |
+| `manifest.webmanifest`, `icons/` | Install metadata and icons (`icon.svg` is the source for the PNGs) |
+| `sw.js` | Service worker: precaches the app and supabase-js, stale-while-revalidate |
+| `push.js`, `onboarding.js`, `sw-push.js` | **Stubs, replaced by Part C** |
+
+---
+
+## 1. Preview on your computer (no Supabase needed)
+
+You need either Python or Node.js. Check by opening **PowerShell** (Start menu → type `PowerShell`):
+
+```powershell
+python --version     # or:
+node --version
+```
+
+1. In File Explorer, open the project's `docs` folder. Click the address bar, type `powershell` and press **Enter**. A PowerShell window opens in that folder.
+2. Start a small web server with **one** of these:
+   ```powershell
+   python -m http.server 8080
+   # or
+   npx serve -l 8080
+   ```
+   (If Windows Firewall asks, click **Allow**.)
+3. Open **http://localhost:8080/?mock=1** in Chrome or Edge.
+4. Press `F12` → click the phone icon (**Toggle device toolbar**) → pick **iPhone 12 Pro** or type width **380**.
+
+✅ You see "Ming 領先你 NT$ 40", two cards, two of your tasks and a green ＋ button.
+
+Useful variants:
+
+| URL | What it does |
+|---|---|
+| `/?mock=1` | Full app with a fake in-memory backend ("Me" and "Ming", 5 tasks, 1 settlement). Reload = fresh start. |
+| `/?mock=1&pair=1` | Same, starting at the pairing screen. Join code: `studybet-demo` (the room is full, so tap 我回來了 and pick slot 1). |
+| `/?dev=1` | The **real** Supabase backend without the "add to Home Screen" gate (needs `config.js`). |
+
+### Test hooks (`?mock=1` only)
+
+Open the browser console (`F12` → **Console**) and type:
+
+```js
+__studybet.state                          // live app state
+__studybet.addTask({ title: '測試', value: 30, due_in_minutes: 10 })
+__studybet.completeTask(__studybet.state.tasks[0].id)   // same path as a tap (generates a photo for proof tasks)
+__studybet.simulatePartnerComplete(20)    // toast "Ming 剛完成 +20 — 你落後 NT$ …"
+__studybet.advance(30)                    // move time forward 30 minutes
+__studybet.setClockOffset(-45 * 60000)    // phone clock 45 min slow; countdowns must not change
+__studybet.simulateOffline(true)          // then complete something; later: simulateOffline(false)
+__studybet.simulateRealtimeDrop()         // header dot turns orange, then green again
+__studybet.simulatePartnerProposeSettlement()   // extra: shows the Agree / Not now card
+__studybet.simulatePartnerRespond(true)          // extra: partner accepts your request
+```
+
+> **Seeing old files after an edit?** The service worker serves the cached copy first and updates in the background. Reload twice, or in DevTools → **Application** → **Service workers** tick **Update on reload**.
+
+---
+
+## 2. Fill in `config.js`
+
+Open `docs/config.js` in Notepad (right-click → **Open with** → **Notepad**) and paste the values between the quotes:
+
+| Key | Where to find it |
+|---|---|
+| `SUPABASE_URL` | Supabase → **Project Settings** (gear) → **Data API** → **Project URL**, e.g. `https://abcdefghijkl.supabase.co` |
+| `SUPABASE_ANON_KEY` | Supabase → **Project Settings** → **API Keys** → the **anon / public** key (or the **publishable** key) |
+| `VAPID_PUBLIC_KEY` | Produced by Part C. Leave empty for now. |
+| `TURNSTILE_SITE_KEY` | Optional. Only if you turned on CAPTCHA in Supabase → **Authentication** (Cloudflare Turnstile). Empty = no CAPTCHA widget. |
+
+These values are safe to publish. **Never** put the `service_role` key here.
+
+Save the file (`Ctrl` + `S`). If `SUPABASE_URL` or `SUPABASE_ANON_KEY` is missing, the app shows a setup screen that lists what is still empty.
+
+---
+
+## 3. Publish on GitHub Pages (step by step)
+
+### 3a. One-time setup
+1. Create a free account at https://github.com.
+2. Install **GitHub Desktop**: https://desktop.github.com → sign in with your GitHub account.
+3. GitHub Desktop → **File** → **Add local repository** → choose the project folder (the one that holds `docs`, `backend` and `CONTRACT.md`). If it says "not a Git repository", click **create a repository** → **Create repository**.
+4. Look at the **Changes** list on the left. You should **not** see any `.env` or key files; `.gitignore` excludes them.
+5. Type a summary (e.g. `first version`) → **Commit to main** → **Publish repository**. Untick **Keep this code private** only if your GitHub plan needs a public repo for Pages (Free plan: Pages requires a **public** repository).
+
+### 3b. Turn on Pages
+1. On github.com open your repository → **Settings** → **Pages** (left sidebar).
+2. **Source**: *Deploy from a branch*. **Branch**: `main`, folder **`/docs`** → **Save**.
+3. Wait 1–2 minutes and reload the page. It shows **"Your site is live at https://<user>.github.io/<repo>/"**.
+
+✅ Open `https://<user>.github.io/<repo>/?mock=1` on your computer and the app appears.
+
+### 3c. Install on the iPhone
+1. On the iPhone open `https://<user>.github.io/<repo>/` in **Safari**.
+2. Tap **Share** → **Add to Home Screen** → **Add**.
+3. Open 賭讀 from the Home Screen icon. In Safari itself the app only shows the install hint, on purpose.
+
+### 3d. Releasing an update
+1. Change files and save.
+2. Bump the version in **both** `docs/sw.js` (`CACHE_VERSION = 'v1.0.1'`) and `docs/src/version.js` (`APP_VERSION = '1.0.1'`).
+3. GitHub Desktop → **Commit to main** → **Push origin**.
+4. Phones pick it up on the next launch and show "新版本已就緒 / 重新整理".
+
+If you only changed `config.js`, there's no need to bump the version: the service worker always fetches `config.js` from the network first.
+
+---
+
+## 4. Manual checklist (on an iPhone, installed to the Home Screen)
+
+- [ ] **Add a task in ≤ 5 s**: tap ＋, type a title, tap 新增. The sheet closes and the row slides in.
+- [ ] **Complete with animation + sound + haptic**: tap the round button. It squishes, "+NT$ 20" floats up, confetti plays, two rising tones sound, the phone ticks (iOS 17.4+), and the headline number counts to its new value.
+- [ ] **Complete with proof < 150 KB**: on a 📷 task, take a photo. In Supabase → Storage → `proofs` the file is ≤ 150 KB.
+- [ ] **Deadline passing moves a row to History** while the app stays open (try a task due in 6 minutes).
+- [ ] **Offline open shows cached data**: open once online, turn on Airplane mode, reopen. The orange "離線中 — 最後更新 hh:mm" bar appears and the data is there.
+- [ ] **Offline completion past the deadline is rejected after reconnect**: in Airplane mode complete a task due in ~6 min, wait until it is past due, turn Airplane mode off. You get "太晚了——伺服器時間顯示期限已經過了".
+- [ ] **Dark mode**: iPhone Settings → Display → Dark. Colours switch and nothing is unreadable.
+- [ ] **320 px width has no horizontal scroll**: Chrome DevTools, width 320, `?mock=1`.
+- [ ] **Lighthouse PWA installable**: Chrome DevTools → **Lighthouse** → check the installability items against the GitHub Pages URL.
+- [ ] **Partner's change within 2 s**: with two phones, complete on one. The other shows a toast and the new gap.
+
+---
+
+## 5. Notes for Part C and maintainers
+
+- **Interfaces kept by the stubs**: `push.js` exports `enablePush()` (called synchronously inside the Settings tap), `getPushStatus()` (string or Promise: `granted | denied | default | unsupported | unavailable`) and `syncBadge(n)` (called after every `get_state()` with `active_task_count`). `onboarding.js` exports `showOnboarding()`. Before calling it, app.js puts a minimal install hint into `#app`. Part C should render its onboarding into `#app`, replacing that hint. `sw-push.js` is loaded by `sw.js` through `importScripts`.
+- **Pairing**: `BAD_CODE` means "wrong code **or** room full" (CONTRACT A1). After a `BAD_CODE` on Join, the app explains both cases and opens the **我回來了** slot picker. The picker is also always reachable under the Join form.
+- **Daily reminder time** is a room setting (`rooms.daily_reminder_time`), so Settings labels it 兩人共用 (shared by both people).
+- **supabase-js** is pinned to `2.117.3` (jsDelivr `+esm`). The 9 module URLs it pulls in are listed in `sw.js` → `CDN_FILES`. When you upgrade, change both `src/api-supabase.js` and that list.
+- **Size**: about 125 KB of own code uncompressed, about 39 KB gzipped as GitHub Pages serves it (excluding supabase-js; `mock.js` loads only with `?mock=1`).
