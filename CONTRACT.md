@@ -101,3 +101,27 @@ Supabase blocks deleting storage files through SQL. `tick` therefore calls `list
 - **Settlement auto-rejection** after 7 days leaves `responded_by = null`, and `get_state()` hides such a proposal immediately. In history, a settlement's `at` is `undone_at`, else `confirmed_at`, else `proposed_at`.
 - **Settlement boundary:** `complete_task` and `respond_settlement` serialize on the room row and take `clock_timestamp()` after the lock. A task completed exactly at `confirmed_at` belongs to the settled period.
 - **Internal tables** `pairing_attempts` and `daily_reminder_log` are invisible to clients.
+
+### A8. Batch 2 (backend `06_dispute_and_daily.sql`, app v1.2.0): disputes pause money; per-member daily reminder
+This addendum **changes behavior** stated above. No function was renamed and no existing call breaks: `dispute_task(p_task_id, p_disputed)` keeps its signature, and `update_settings` gains one optional argument.
+
+**Disputes (replaces "sets a badge flag; never changes scores" under `dispute_task`, and extends "Scoring")**
+- A done task with `disputed = true` counts in **no** net while disputed: not the week net, not the total net, not `propose_settlement`'s zero check and not the amount `respond_settlement` freezes. Scoring becomes: net_slot1 = sum of done, **non-disputed** tasks by slot 1 − the same for slot 2.
+- `done_counts` and streaks are **not** affected by disputes.
+- Only the member who disputed (the non-owner) can set or clear the flag; the owner gets `NOT_ALLOWED` for both (unchanged rule, now stated for clearing too).
+- After `dispute_task(id, false)` the task counts again in the window of its **original `completed_at`**: the week it was completed in, and the total only if `completed_at` is after the latest confirmed settlement.
+- **Edge case:** a task still disputed when a settlement is confirmed, and completed before `confirmed_at`, is left out of the frozen amount **and** stays outside the new total window after it is cleared. It is excluded from the total permanently, unless that settlement is undone (then the usual window applies again and it counts). It still returns to its week net.
+- `dispute_task` now takes the room lock (like `complete_task` and `respond_settlement`), so "disputed at confirmation time" is unambiguous.
+- `get_state()` adds `disputed_pending: {count, amount_me}`: disputed tasks inside the current total window and their value from the caller's point of view.
+
+**Notifications**
+- `partner_dispute` body: `「{title}」，暫不計分` (send-push copy: `「{title}」的照片需要再確認，暫不計分`).
+- New kind **`dispute_cleared`**, to the task owner when the dispute is cleared: title `{N} 取消質疑`, body `「{title}」+{value} 已加回`. Payload carries `task_id`, `url: './#history'`, `tag: 'partner_dispute:{task_id}'` (it replaces the dispute notification on the device) and `counted` (boolean). When `counted = false` (the edge case above) the body is `「{title}」在上次結算前完成，不再計分`. The `notification_outbox.kind` check accepts it.
+
+**Daily reminder per member**
+- New column `members.daily_reminder_enabled boolean not null default true`.
+- `update_settings(p_display_name text default null, p_daily_reminder_time time default null, p_daily_reminder_enabled boolean default null)`: `null` keeps the current value; the switch changes only the caller's row. The old 2-argument function is dropped so PostgREST never sees two candidates. Calls with 0–2 arguments, by name or position, behave exactly as before.
+- `get_state().me.daily_reminder_enabled` is exposed; **the partner's value is not** (`partner` has no such key). Clients may `select` `members` only through the columns `id, room_id, slot, display_name, created_at`.
+- `claim_due_notifications` creates `daily` rows only for members with the switch on. The time stays shared (`rooms.daily_reminder_time`).
+
+**Compatibility:** the frontend detects this backend by `get_state().me.daily_reminder_enabled !== undefined`. Before 06 is applied it keeps the pre-batch-2 behavior and texts. Re-running `02_rls_and_rpc.sql` requires re-running `06` afterwards.

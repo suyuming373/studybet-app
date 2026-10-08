@@ -1,6 +1,6 @@
 -- =====================================================================
 -- 賭讀 / StudyBet — tests.sql
--- Run in the Supabase SQL Editor AFTER 01–04. No extensions needed.
+-- Run in the Supabase SQL Editor AFTER 01–06. No extensions needed.
 -- Simulates two (and more) anonymous users by switching to role
 -- "authenticated" and setting request.jwt.claims, exactly like PostgREST.
 --
@@ -120,6 +120,10 @@ declare
   i int;
   t_a uuid; t_b uuid; t_c uuid; t_ab uuid; t_od uuid; t_late uuid; t_proof uuid; t_del uuid; t_soon uuid;
   t_fresh uuid; t_old_proof uuid;
+  u5 uuid := gen_random_uuid();   -- batch 2 room: "Ann", slot 1
+  u6 uuid := gen_random_uuid();   -- batch 2 room: "Bo", slot 2
+  v_room2 uuid;
+  x1 uuid; x2 uuid; x3 uuid; x4 uuid;
   v_fn text;
   v_sid uuid;
   v_conf timestamptz;
@@ -254,11 +258,36 @@ begin
     perform studybet_test.chk('dispute: owner cannot dispute own task', studybet_test.err(r) = 'NOT_ALLOWED', r);
     r := studybet_test.run_as(u2, format('select to_jsonb(public.dispute_task(%L, true))::text', t_late));
     perform studybet_test.chk('dispute: only done tasks', studybet_test.err(r) = 'TASK_NOT_DONE', r);
+    -- (06) a disputed task pauses its money until the disputer clears it
+    j := studybet_test.state(u1);
     r := studybet_test.run_as(u2, format('select to_jsonb(public.dispute_task(%L, true))::text', t_a));
-    perform studybet_test.chk('dispute: other member can dispute; scores unchanged',
-      (studybet_test.j(r) ->> 'disputed')::bool and (studybet_test.state(u1) ->> 'total_net_me')::int = 40, r);
-    perform studybet_test.chk('notify: partner_dispute queued for the owner',
-      exists (select 1 from public.notification_outbox where recipient_id = u1 and kind = 'partner_dispute'), null);
+    perform studybet_test.chk('dispute: other member can dispute; its NT$ 30 is paused (total and week 40 → 10)',
+      (studybet_test.j(r) ->> 'disputed')::bool
+      and (studybet_test.state(u1) ->> 'total_net_me')::int = 10 and (studybet_test.state(u1) ->> 'week_net_me')::int = 10
+      and (studybet_test.state(u2) ->> 'total_net_me')::int = -10, r);
+    perform studybet_test.chk('dispute: done_counts and streaks unchanged while disputed',
+      studybet_test.state(u1) -> 'done_counts' = j -> 'done_counts' and studybet_test.state(u1) -> 'streaks' = j -> 'streaks',
+      (studybet_test.state(u1) -> 'done_counts')::text);
+    perform studybet_test.chk('dispute: get_state reports the paused amount (disputed_pending)',
+      studybet_test.state(u1) -> 'disputed_pending' = '{"count": 1, "amount_me": 30}'::jsonb
+      and studybet_test.state(u2) -> 'disputed_pending' = '{"count": 1, "amount_me": -30}'::jsonb,
+      (studybet_test.state(u1) -> 'disputed_pending')::text);
+    perform studybet_test.chk('notify: partner_dispute queued for the owner, body says 暫不計分',
+      exists (select 1 from public.notification_outbox where recipient_id = u1 and kind = 'partner_dispute'
+              and payload ->> 'body' = '「A」，暫不計分'), null);
+    r := studybet_test.run_as(u1, format('select to_jsonb(public.dispute_task(%L, false))::text', t_a));
+    perform studybet_test.chk('dispute: owner cannot clear the dispute',
+      studybet_test.err(r) = 'NOT_ALLOWED' and (select disputed from public.tasks where id = t_a), r);
+    r := studybet_test.run_as(u2, format('select to_jsonb(public.dispute_task(%L, false))::text', t_a));
+    perform studybet_test.chk('dispute: disputer clears → NT$ 30 counts again (40 / −40)',
+      not (studybet_test.j(r) ->> 'disputed')::bool and (studybet_test.j(r) ->> 'disputed_at') is null
+      and (studybet_test.state(u1) ->> 'total_net_me')::int = 40 and (studybet_test.state(u1) ->> 'week_net_me')::int = 40
+      and (studybet_test.state(u2) ->> 'total_net_me')::int = -40, r);
+    perform studybet_test.chk('notify: dispute_cleared queued for the owner ("Hua 取消質疑" / "「A」+30 已加回")',
+      exists (select 1 from public.notification_outbox where recipient_id = u1 and kind = 'dispute_cleared'
+              and payload ->> 'title' = 'Hua 取消質疑' and payload ->> 'body' = '「A」+30 已加回'
+              and (payload ->> 'counted')::bool and payload ->> 'task_id' = t_a::text)
+      and not exists (select 1 from public.notification_outbox where recipient_id = u2 and kind = 'dispute_cleared'), null);
     perform studybet_test.chk('notify: partner_done queued for the other member',
       (select count(*) from public.notification_outbox where recipient_id = u2 and kind = 'partner_done') = 2
       and exists (select 1 from public.notification_outbox where recipient_id = u1 and kind = 'partner_done'
@@ -527,9 +556,124 @@ begin
     r := studybet_test.run_as(u2, format('select public.join_room(%L, %L, 2::smallint)::text', v_code, 'Hua'));
     perform studybet_test.chk('reclaim: original device can reclaim back', (studybet_test.j(r) ->> 'id')::uuid = u2, r);
 
+    -- ================= Batch 2 (06): disputes pause money, per-member daily reminder =================
+    -- A second, clean room: u5 "Ann" (slot 1), u6 "Bo" (slot 2).
+    r := studybet_test.run_as(u5, format('select public.create_room(%L, %L)::text', v_code || '-b2', 'Ann'));
+    v_room2 := (studybet_test.j(r) -> 'room' ->> 'id')::uuid;
+    r := studybet_test.run_as(u6, format('select public.join_room(%L, %L)::text', v_code || '-b2', 'Bo'));
+    x1 := studybet_test.new_task(u5, 'X1', 20);
+    x2 := studybet_test.new_task(u6, 'X2', 5);
+    perform studybet_test.run_as(u5, format('select to_jsonb(public.complete_task(%L))::text', x1));
+    perform studybet_test.run_as(u6, format('select to_jsonb(public.complete_task(%L))::text', x2));
+    j := studybet_test.state(u5);
+    perform studybet_test.chk('b2: setup total and week +15 / −15',
+      (j ->> 'total_net_me')::int = 15 and (j ->> 'week_net_me')::int = 15
+      and (studybet_test.state(u6) ->> 'total_net_me')::int = -15, (j ->> 'total_net_me'));
+
+    perform studybet_test.run_as(u6, format('select to_jsonb(public.dispute_task(%L, true))::text', x1));
+    perform studybet_test.chk('b2: dispute excludes the money from week AND total (+15 → −5)',
+      (studybet_test.state(u5) ->> 'total_net_me')::int = -5 and (studybet_test.state(u5) ->> 'week_net_me')::int = -5
+      and (studybet_test.state(u6) ->> 'total_net_me')::int = 5 and (studybet_test.state(u6) ->> 'week_net_me')::int = 5,
+      (studybet_test.state(u5) ->> 'total_net_me') || ' / ' || (studybet_test.state(u5) ->> 'week_net_me'));
+    perform studybet_test.chk('b2: done_counts and streaks unchanged by the dispute',
+      studybet_test.state(u5) -> 'done_counts' = j -> 'done_counts' and studybet_test.state(u5) -> 'streaks' = j -> 'streaks'
+      and (studybet_test.state(u5) -> 'done_counts' -> 'me' ->> 'week')::int = 1
+      -- get_state uses now() = transaction start; tasks here are completed at clock_timestamp(), so ask at that time
+      and public.member_streak(u5, clock_timestamp()) = 1, public.member_streak(u5, clock_timestamp())::text);
+    perform studybet_test.chk('b2: week_net_slot1 / total_net_slot1 exclude it directly too',
+      public.week_net_slot1(v_room2) = -5 and public.total_net_slot1(v_room2) = -5, null);
+    r := studybet_test.run_as(u5, format('select to_jsonb(public.dispute_task(%L, false))::text', x1));
+    perform studybet_test.chk('b2: owner cannot clear the dispute (still −5)',
+      studybet_test.err(r) = 'NOT_ALLOWED' and (studybet_test.state(u5) ->> 'total_net_me')::int = -5, r);
+    r := studybet_test.run_as(u6, 'select to_jsonb(public.propose_settlement())::text');
+    perform studybet_test.chk('b2: settlement can be proposed on the remaining gap (−5)', studybet_test.j(r) ->> 'status' = 'pending', r);
+    perform studybet_test.run_as(u5, format('select to_jsonb(public.respond_settlement(%L, false))::text', (studybet_test.j(r) ->> 'id')));
+    perform studybet_test.run_as(u6, format('select to_jsonb(public.dispute_task(%L, false))::text', x1));
+    perform studybet_test.chk('b2: clearing adds it back to week and total (+15)',
+      (studybet_test.state(u5) ->> 'total_net_me')::int = 15 and (studybet_test.state(u5) ->> 'week_net_me')::int = 15, null);
+
+    -- dispute across the week boundary (fixed past dates; 2024-03-03 is a Sunday)
+    insert into public.tasks(room_id, owner_id, title, value, due_at, status, created_at, completed_at, disputed, disputed_at) values
+      (v_room2, u5, 'wk-prev', 7, '2024-03-04 01:00+08', 'done', '2024-03-03 20:00+08', '2024-03-03 23:00+08', true, '2024-03-04 09:00+08'),
+      (v_room2, u5, 'wk-next', 9, '2024-03-04 23:00+08', 'done', '2024-03-04 08:00+08', '2024-03-04 10:00+08', false, null);
+    select id into x4 from public.tasks where room_id = v_room2 and title = 'wk-prev';
+    perform studybet_test.chk('b2: week boundary — disputed Sunday task excluded from its own week, Monday unaffected',
+      public.week_net_slot1(v_room2, '2024-03-03 23:30+08') = 0 and public.week_net_slot1(v_room2, '2024-03-04 12:00+08') = 9,
+      public.week_net_slot1(v_room2, '2024-03-03 23:30+08') || ' / ' || public.week_net_slot1(v_room2, '2024-03-04 12:00+08'));
+    perform studybet_test.run_as(u6, format('select to_jsonb(public.dispute_task(%L, false))::text', x4));
+    perform studybet_test.chk('b2: week boundary — cleared on Monday, it counts in the week of its completed_at (Sunday), not Monday''s',
+      public.week_net_slot1(v_room2, '2024-03-03 23:30+08') = 7 and public.week_net_slot1(v_room2, '2024-03-04 12:00+08') = 9, null);
+    delete from public.tasks where room_id = v_room2 and title in ('wk-prev', 'wk-next');
+
+    -- a task still disputed when a settlement is confirmed stays excluded afterwards
+    x3 := studybet_test.new_task(u5, 'X3', 10);
+    perform studybet_test.run_as(u5, format('select to_jsonb(public.complete_task(%L))::text', x3));
+    perform studybet_test.run_as(u6, format('select to_jsonb(public.dispute_task(%L, true))::text', x3));
+    r := studybet_test.run_as(u5, 'select to_jsonb(public.propose_settlement())::text');
+    v_sid := (studybet_test.j(r) ->> 'id')::uuid;
+    r := studybet_test.run_as(u6, format('select to_jsonb(public.respond_settlement(%L, true))::text', v_sid));
+    perform studybet_test.chk('b2: frozen settlement amount excludes the disputed task (15, not 25)',
+      (studybet_test.j(r) ->> 'amount_slot1_net')::int = 15 and (studybet_test.state(u5) ->> 'total_net_me')::int = 0, r);
+    perform studybet_test.run_as(u6, format('select to_jsonb(public.dispute_task(%L, false))::text', x3));
+    perform studybet_test.chk('b2: disputed at settlement time → stays excluded from the new total after clearing (0)',
+      (studybet_test.state(u5) ->> 'total_net_me')::int = 0 and (studybet_test.state(u6) ->> 'total_net_me')::int = 0,
+      studybet_test.state(u5) ->> 'total_net_me');
+    perform studybet_test.chk('b2: …but it counts in the week again (week 15 → 25)',
+      (studybet_test.state(u5) ->> 'week_net_me')::int = 25, studybet_test.state(u5) ->> 'week_net_me');
+    perform studybet_test.chk('b2: dispute_cleared for a pre-settlement task says it no longer counts',
+      exists (select 1 from public.notification_outbox where recipient_id = u5 and kind = 'dispute_cleared'
+              and payload ->> 'task_id' = x3::text and not (payload ->> 'counted')::bool
+              and payload ->> 'body' = '「X3」在上次結算前完成，不再計分'), null);
+    r := studybet_test.run_as(u5, format('select to_jsonb(public.undo_settlement(%L))::text', v_sid));
+    perform studybet_test.chk('b2: undo settlement restores the full total incl. the now-cleared task (25 / −25)',
+      studybet_test.j(r) ->> 'status' = 'undone'
+      and (studybet_test.state(u5) ->> 'total_net_me')::int = 25 and (studybet_test.state(u6) ->> 'total_net_me')::int = -25,
+      studybet_test.state(u5) ->> 'total_net_me');
+    perform studybet_test.run_as(u6, format('select to_jsonb(public.dispute_task(%L, true))::text', x3));
+    perform studybet_test.chk('b2: re-disputed after the undo → paused again (15)',
+      (studybet_test.state(u5) ->> 'total_net_me')::int = 15, studybet_test.state(u5) ->> 'total_net_me');
+
+    -- per-member daily reminder
+    perform studybet_test.chk('b2: daily_reminder_enabled defaults to true, shown on me only',
+      (studybet_test.state(u5) -> 'me' ->> 'daily_reminder_enabled')::bool
+      and not (studybet_test.state(u5) -> 'partner') ? 'daily_reminder_enabled', (studybet_test.state(u5) -> 'partner')::text);
+    r := studybet_test.run_as(u5, 'select public.update_settings(null, null, false)::text');
+    perform studybet_test.chk('b2: update_settings(p_daily_reminder_enabled => false) turns it off for the caller only',
+      not (studybet_test.j(r) -> 'me' ->> 'daily_reminder_enabled')::bool
+      and (studybet_test.state(u6) -> 'me' ->> 'daily_reminder_enabled')::bool, r);
+    r := studybet_test.run_as(u5, 'select public.update_settings(null, null, null)::text');
+    perform studybet_test.chk('b2: update_settings with null keeps the value (still off)',
+      not (studybet_test.j(r) -> 'me' ->> 'daily_reminder_enabled')::bool, r);
+    r := studybet_test.run_as(u5, $q$select public.update_settings(p_display_name => 'Ann2')::text$q$);
+    perform studybet_test.chk('b2: old-style named call (name only) still works and keeps the switch',
+      studybet_test.j(r) -> 'me' ->> 'display_name' = 'Ann2' and not (studybet_test.j(r) -> 'me' ->> 'daily_reminder_enabled')::bool, r);
+    perform studybet_test.chk('b2: the 2-argument update_settings is gone (no ambiguous overload)',
+      to_regprocedure('public.update_settings(text, time)') is null
+      and (select count(*) from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+           where n.nspname = 'public' and p.proname = 'update_settings') = 1, null);
+    r := studybet_test.run_as(u6, 'select string_agg(daily_reminder_enabled::text, '','') from public.members');
+    perform studybet_test.chk('b2: partner cannot read members.daily_reminder_enabled', r like 'ERR:permission denied%', r);
+    r := studybet_test.run_as(u6, 'select count(display_name)::text from public.members');
+    perform studybet_test.chk('b2: other members columns stay readable (2 rows)', r = 'OK:2', r);
+    -- both have an active task; reminder time = this very minute (Taipei)
+    perform studybet_test.new_task(u5, 'today-a', 3);
+    perform studybet_test.new_task(u6, 'today-b', 3);
+    update public.rooms set daily_reminder_time = date_trunc('minute', now() at time zone timezone)::time where id = v_room2;
+    perform public.claim_due_notifications(v_room2);
+    perform studybet_test.chk('b2: daily reminder created only for the member who has it on',
+      exists (select 1 from public.notification_outbox where recipient_id = u6 and kind = 'daily')
+      and not exists (select 1 from public.notification_outbox where recipient_id = u5 and kind = 'daily')
+      and not exists (select 1 from public.daily_reminder_log where member_id = u5), null);
+    perform studybet_test.run_as(u5, 'select public.update_settings(null, null, true)::text');
+    perform public.claim_due_notifications(v_room2);
+    perform studybet_test.chk('b2: turned back on → daily reminder created (time stays shared)',
+      exists (select 1 from public.notification_outbox where recipient_id = u5 and kind = 'daily')
+      and (select count(*) from public.notification_outbox where recipient_id = u6 and kind = 'daily') = 1, null);
+
     -- ================= Cleanup =================
     delete from public.rooms where id = v_room;
-    delete from public.pairing_attempts where user_id in (u1, u2, u3, u4);
+    delete from public.rooms where id = v_room2;
+    delete from public.pairing_attempts where user_id in (u1, u2, u3, u4, u5, u6);
   exception when others then
     -- everything above was rolled back; record the crash as a failure
     insert into studybet_test.results(name, ok, detail)

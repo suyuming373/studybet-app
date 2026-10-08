@@ -42,7 +42,12 @@ Deno.test('copy: table texts', () => {
   assertEquals(render(ctx({ kind: 'partner_done', total_net_me: -40 })), { title: 'Ming 剛完成 +20', body: '你現在落後 NT$ 40，輪到你了' });
   assertEquals(render(ctx({ kind: 'partner_done', total_net_me: 10 })).body, '你領先 NT$ 10');
   assertEquals(render(ctx({ kind: 'partner_done', total_net_me: 0 })).body, '平手');
-  assertEquals(render(ctx({ kind: 'partner_dispute' })), { title: 'Ming 質疑了你的證明', body: '「微積分」的照片需要再確認' });
+  assertEquals(render(ctx({ kind: 'partner_dispute' })), { title: 'Ming 質疑了你的證明', body: '「微積分」的照片需要再確認，暫不計分' });
+  assertEquals(render(ctx({ kind: 'dispute_cleared', payload: { counted: true } })), { title: 'Ming 取消質疑', body: '「微積分」+20 已加回' });
+  assertEquals(render(ctx({ kind: 'dispute_cleared' })), { title: 'Ming 取消質疑', body: '「微積分」+20 已加回' });
+  assertEquals(render(ctx({ kind: 'dispute_cleared', payload: { counted: false } })), { title: 'Ming 取消質疑', body: '「微積分」在上次結算前完成，不再計分' });
+  // task gone (deleted row) → the backend's own text is kept
+  assertEquals(render(ctx({ kind: 'dispute_cleared', task_title: null, task_value: null, payload: { title: 'Ming 取消質疑', body: '「微積分」+20 已加回' } })), { title: 'Ming 取消質疑', body: '「微積分」+20 已加回' });
   assertEquals(render(ctx({ kind: 'overdue' })), { title: '賭讀 任務已逾期', body: '「微積分」已逾期，不影響分數' });
   assertEquals(render(ctx({ kind: 'daily' })), { title: '賭讀 📚 今天還有 2 件事沒做', body: '最近到期：「英文單字」' });
   assertEquals(render(ctx({ kind: 'settlement_request', total_net_me: -40 })), { title: 'Ming 想結算', body: '同意後總計歸零，目前 NT$ 40' });
@@ -52,7 +57,7 @@ Deno.test('copy: table texts', () => {
 });
 Deno.test('copy: limits hold for the longest inputs', () => {
   const long = '一二三四五六七八九十'.repeat(4);   // 40 chars, the title maximum
-  for (const kind of ['due_1h', 'due_15m', 'partner_done', 'partner_dispute', 'overdue', 'daily', 'settlement_request', 'settlement_result']) {
+  for (const kind of ['due_1h', 'due_15m', 'partner_done', 'partner_dispute', 'dispute_cleared', 'overdue', 'daily', 'settlement_request', 'settlement_result']) {
     const r = render(ctx({ kind, task_title: long, next_title: long, partner_name: '六個字的名字', task_value: 50, total_net_me: -9999, badge: 99, payload: { result: 'confirmed' } }));
     assert(len(r.title) <= TITLE_MAX, `${kind} title ${len(r.title)}`);
     assert(len(r.body) <= BODY_MAX, `${kind} body ${len(r.body)}`);
@@ -148,6 +153,20 @@ Deno.test('deliver: success on both devices', async () => {
   assertEquals(log.sort(), ['finish 7 true', 'success a', 'success b']);
   const msg = JSON.parse(seen[0]);
   assertEquals([msg.title, msg.body, msg.badge, msg.tag, msg.url], ['Ming 剛完成 +20', '你現在落後 NT$ 40，輪到你了', 2, 'partner_done:t', './#history']);
+});
+Deno.test('deliver: dispute_cleared → owner gets "{N} 取消質疑", same tag as the dispute, 24 h TTL', async () => {
+  const payload = { task_id: 't', tag: 'partner_dispute:t', url: './#history', counted: true };
+  const { store } = fakeStore({
+    claim: async () => [{ id: 7, recipient_id: 'r', kind: 'dispute_cleared', payload, attempts: 1 }],
+    context: async () => ctx({ kind: 'dispute_cleared', payload, task_title: '化學', task_value: 30 }),
+  });
+  const ttls: number[] = [];
+  const seen: string[] = [];
+  const sender: Sender = async (_sub, p, ttl) => { seen.push(p); ttls.push(ttl); return 201; };
+  assert((await deliverRow(store, sender, { ...row, kind: 'dispute_cleared' })).ok);
+  const msg = JSON.parse(seen[0]);
+  assertEquals([msg.title, msg.body, msg.tag, msg.kind], ['Ming 取消質疑', '「化學」+30 已加回', 'partner_dispute:t', 'dispute_cleared']);
+  assertEquals(ttls[0], 24 * 3600);
 });
 Deno.test('deliver: 410 disables that subscription; partly delivered counts as sent', async () => {
   const { store, log } = fakeStore();

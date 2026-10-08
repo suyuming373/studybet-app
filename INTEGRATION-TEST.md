@@ -1,6 +1,6 @@
 # 賭讀 / StudyBet — Integration test (two real iPhones)
 
-**You need:** two iPhones with **iOS 16.4 or later** (call them **A** and **B**), the published app URL, and a computer with the Supabase dashboard open. Setup is complete when README-push.md steps 1–11 are done.
+**You need:** two iPhones with **iOS 16.4 or later** (call them **A** and **B**), the published app URL, and a computer with the Supabase dashboard open. Setup is complete when README-push.md steps 1–11 are done **and** `backend/06_dispute_and_daily.sql` has been run, with `send-push` redeployed afterwards (app v1.2.0, README-backend.md step 4b).
 
 **How to use:** do the items in order. Tick **Pass** or **Fail** and write what you saw under "Notes". "Locked" means: press the side button and wait 10 seconds.
 
@@ -85,6 +85,18 @@ Let task **Y** from item 5 pass its deadline (or add one due in 6 min and wait).
 
 - [ ] Pass - [ ] Fail - Notes:
 
+### 7b. Daily reminder switch is per person (v1.2.0)
+1. On B: **⋯ › 設定** → switch **每日提醒（開／關只影響你自己）** off. A keeps it on.
+2. On A: set **每日提醒時間** to **3 minutes from now** (the next day, or after changing the date if 7 already ran today). Both A and B have an active task. Lock both.
+
+**Expected:**
+* A gets the daily reminder; **B gets nothing**.
+* B's 設定 still shows the shared time A just set. A's 設定 shows A's own switch (on); there is no way to see B's switch on A.
+* Switch B back on afterwards.
+* **Realtime on `members` still works** (06 made `members` readable column by column): A changes its name in 設定 → B shows the new name within ~2 s without reopening.
+
+- [ ] Pass - [ ] Fail - Notes:
+
 ### 8. Badge equals active, non-overdue tasks
 On A, with the app open and closed in turn:
 1. Note the number of active tasks in **我的**. The icon badge shows the same number.
@@ -102,10 +114,19 @@ On A, with the app open and closed in turn:
 1. A adds a task with **📷 需要拍照證明** and completes it with a photo.
 2. B: **紀錄** → tap that task → the photo loads → **質疑這個證明**. Lock A first.
 
+**Expected (v1.2.0: disputes pause the money):**
+* B first sees a dialog: "質疑期間「…」的 NT$ {value} 暫不計分…" → **質疑**.
+* A gets "B 質疑了你的證明" / "「…」的照片需要再確認，暫不計分".
+* The task shows **質疑中 · 暫不計分** on both phones, with the amount struck through in 紀錄.
+* **Both headlines change by the task's value** (it counts for nobody now). The ✓ counts and 🔥 streaks don't change.
+* On A, the task detail has **no** 取消質疑 button; on B it does.
+* **⋯ › 結算** on either phone shows "質疑中的任務不計入這次結算（目前 1 件）…".
+
+3. B: tap the task again → **取消質疑**. Lock A first.
+
 **Expected:**
-* A gets "B 質疑了你的證明" / "「…」的照片需要再確認".
-* The task shows **被質疑** on both phones.
-* **Scores don't change.**
+* A gets "B 取消質疑" / "「…」+{value} 已加回". It replaces the earlier dispute notification.
+* Both headlines return to the value before step 2. The badge disappears on both phones.
 
 - [ ] Pass - [ ] Fail - Notes:
 
@@ -118,6 +139,19 @@ On A, with the app open and closed in turn:
 * B gets "A 想結算" / "同意後總計歸零，目前 NT$ {amount}".
 * After 同意: both headlines show 平手 / NT$ 0. A gets "B 已同意結算" / "總計已歸零，可在歷史撤銷".
 * After 撤銷: the previous gap returns on both phones, and the other phone gets "結算已撤銷".
+
+- [ ] Pass - [ ] Fail - Notes:
+
+### 10b. Disputed during a settlement stays out of the total (v1.2.0)
+1. B disputes one of A's done tasks (as in 9), worth **V**. Note the headline: this is the amount that will be settled.
+2. A: **⋯ › 結算 › 請求歸零**. B: **同意**. Both headlines: 平手 / NT$ 0.
+3. B: **取消質疑** on that task.
+
+**Expected:**
+* After step 2, 紀錄's settlement row shows the amount from step 1 (without V).
+* After step 3 the headline **stays at 平手 / NT$ 0**: the task was completed before the settlement, so it does not come back into the total. The **本週** numbers on the cards do go up by V.
+* A gets "B 取消質疑" / "「…」在上次結算前完成，不再計分".
+* Optional: 撤銷 that settlement → the full previous gap **including V** returns.
 
 - [ ] Pass - [ ] Fail - Notes:
 

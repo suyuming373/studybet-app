@@ -41,7 +41,8 @@ Useful variants:
 |---|---|
 | `/?mock=1` | Full app with a fake in-memory backend ("Me" and "Ming", 5 tasks, 1 settlement). Reload = fresh start. |
 | `/?mock=1&pair=1` | Same, starting at the pairing screen. Join code: `studybet-demo` (the room is full, so tap 我回來了 and pick slot 1). |
-| `/?mock=1&batch2=1` | Same, but the fake backend also has the batch 2 field `me.daily_reminder_enabled`, so 設定 shows the **每日提醒** on/off switch. Without `batch2=1` the switch stays hidden and the mock rejects `p_daily_reminder_enabled`, like the deployed backend. |
+| `/?mock=1&batch2=1` | Same, but the fake backend behaves like the real one **with `backend/06` applied**: disputed tasks pause their money (badge "質疑中 · 暫不計分", settlement note), and `get_state().me.daily_reminder_enabled` exists, so 設定 shows the **每日提醒** switch (the partner's value is never exposed). |
+| `/?mock=1` (no `batch2`) | Behaves like a backend **without** 06: disputes don't touch the money, the switch stays hidden and the mock rejects `p_daily_reminder_enabled`. Useful to check that v1.2.0 still works before you run 06. |
 | `/?dev=1` | The **real** Supabase backend without the "add to Home Screen" gate (needs `config.js`). |
 
 ### Test hooks (`?mock=1` only)
@@ -59,6 +60,8 @@ __studybet.simulateOffline(true)          // then complete something; later: sim
 __studybet.simulateRealtimeDrop()         // header dot turns orange, then green again
 __studybet.simulatePartnerProposeSettlement()   // extra: shows the Agree / Not now card
 __studybet.simulatePartnerRespond(true)          // extra: partner accepts your request
+__studybet.simulatePartnerDispute()              // Ming disputes your latest done task (with &batch2=1 its money pauses)
+__studybet.simulatePartnerDispute(id, false)     // …and clears it again: toast "Ming 取消質疑「…」，+N 已加回"
 ```
 
 > **Seeing old files after an edit?** The service worker serves the cached copy first and updates in the background. Reload twice, or in DevTools → **Application** → **Service workers** tick **Update on reload**.
@@ -125,6 +128,7 @@ If you only changed `config.js`, there's no need to bump the version: the servic
 - [ ] **320 px width has no horizontal scroll**: Chrome DevTools, width 320, `?mock=1`.
 - [ ] **Lighthouse PWA installable**: Chrome DevTools → **Lighthouse** → check the installability items against the GitHub Pages URL.
 - [ ] **Partner's change within 2 s**: with two phones, complete on one. The other shows a toast and the new gap.
+- [ ] **Dispute pauses the money (v1.2.0, after 06)**: dispute the partner's done task → confirm dialog → both headlines change by its value, badge "質疑中 · 暫不計分". Only the disputer has **取消質疑**; tapping it brings the money back.
 
 ---
 
@@ -139,6 +143,8 @@ If you only changed `config.js`, there's no need to bump the version: the servic
 - **Service worker:** `sw-push.js` holds the push and notification-click handlers. `SUPPRESS_WHEN_FOCUSED` sits at the top.
 - **Setup:** see `../README-push.md`. Diagnostics: `?debug=1`, or tap the version in Settings 5 times.
 - **Pairing**: `BAD_CODE` means "wrong code **or** room full" (CONTRACT A1). After a `BAD_CODE` on Join, the app explains both cases and opens the **我回來了** slot picker. The picker is also always reachable under the Join form.
-- **Daily reminder time** is a room setting (`rooms.daily_reminder_time`), so Settings labels it 兩人共用 (shared by both people).
+- **Daily reminder time** is a room setting (`rooms.daily_reminder_time`), so Settings labels it 兩人共用 (shared by both people). The **on/off switch** is per person (`members.daily_reminder_enabled`, backend 06): "每日提醒（開／關只影響你自己）".
+- **Batch 2 detection (v1.2.0):** `store.js` `hasReminderToggle()` / `disputesPauseMoney()` are true when `get_state().me.daily_reminder_enabled` is defined, i.e. `backend/06_dispute_and_daily.sql` has been run. Until then the app keeps the old behavior and texts (dispute = badge "被質疑" only, no switch, no settlement note), so this frontend can be published before or after running 06.
+- **Disputes (after 06):** a disputed task counts for nobody until the member who disputed it taps **取消質疑**. A task still disputed when a settlement is confirmed stays out of the total even after it is cleared (it still counts in its week); the Settlement sheet says "質疑中的任務不計入這次結算". See `CONTRACT.md` → A8.
 - **supabase-js** is pinned to `2.117.3` (jsDelivr `+esm`). The 9 module URLs it pulls in are listed in `sw.js` → `CDN_FILES`. When you upgrade, change both `src/api-supabase.js` and that list.
 - **Size**: about 125 KB of own code uncompressed, about 39 KB gzipped as GitHub Pages serves it (excluding supabase-js; `mock.js` loads only with `?mock=1`).

@@ -76,14 +76,17 @@ export function createMockApi({ pair = false, batch2 = false } = {}) {
   function me() { if (!uid) fail('NOT_AUTHENTICATED'); return memberOf(uid) || fail('NOT_IN_ROOM'); }
   const roomOf = (id) => db.rooms.find((r) => r.id === id);
   const partnerOf = (m) => db.members.find((x) => x.room_id === m.room_id && x.id !== m.id) || null;
-  // ?batch2=1: members.daily_reminder_enabled exists (default on). Without it the field is absent, like the deployed backend.
+  // ?batch2=1 mirrors backend/06: get_state().me.daily_reminder_enabled (default on); the partner's value is
+  // never exposed. Without batch2 the field is absent everywhere, like a backend without 06.
   const memberJson = (m) => {
     if (!m) return null;
     const j = clone(m);
-    if (batch2) j.daily_reminder_enabled = m.daily_reminder_enabled ?? true;
-    else delete j.daily_reminder_enabled;
+    delete j.daily_reminder_enabled;
     return j;
   };
+  const meJson = (m) => (batch2 ? { ...memberJson(m), daily_reminder_enabled: m.daily_reminder_enabled ?? true } : memberJson(m));
+  // 06: a disputed done task counts for nobody until the disputer clears it (counts and streaks unaffected).
+  const scores = (t) => t.status === 'done' && !(batch2 && t.disputed);
   const roomJson = (r) => ({ id: r.id, timezone: r.timezone, daily_reminder_time: r.daily_reminder_time, created_at: r.created_at });
   const roomTasks = (rid) => db.tasks.filter((t) => t.room_id === rid && !t.deleted_at);
   const slotOf = (id) => memberOf(id)?.slot;
@@ -95,7 +98,7 @@ export function createMockApi({ pair = false, batch2 = false } = {}) {
   function netSlot1(rid, from, exclusive) {
     let n = 0;
     for (const t of roomTasks(rid)) {
-      if (t.status !== 'done') continue;
+      if (!scores(t)) continue;
       const c = ms(t.completed_at);
       if (from != null && (exclusive ? c <= from : c < from)) continue;
       n += slotOf(t.owner_id) === 1 ? t.value : -t.value;
@@ -133,6 +136,11 @@ export function createMockApi({ pair = false, batch2 = false } = {}) {
     }
   }
 
+  function disputedPending(m, rid, bound) {
+    const ts = roomTasks(rid).filter((t) => t.status === 'done' && t.disputed && (bound == null || ms(t.completed_at) > bound));
+    return { count: ts.length, amount_me: ts.reduce((n, t) => n + (t.owner_id === m.id ? t.value : -t.value), 0) };
+  }
+
   function getState() {
     const m = me();
     const r = roomOf(m.room_id);
@@ -150,12 +158,13 @@ export function createMockApi({ pair = false, batch2 = false } = {}) {
     return {
       server_now: iso(now()),
       room: roomJson(r),
-      me: memberJson(m),
+      me: meJson(m),
       partner: memberJson(p),
       week_start: iso(ws),
       week_end: iso(zoned(wp.y, wp.mo, wp.d + 7, 0, 0)),
       week_net_me: sign * netSlot1(r.id, ws, false),
       total_net_me: sign * totalNetSlot1(r.id),
+      ...(batch2 ? { disputed_pending: disputedPending(m, r.id, bound) } : {}),
       done_counts: { me: counts(m.id), partner: p ? counts(p.id) : { week: 0, total: 0 } },
       streaks: { me: streak(m.id), partner: p ? streak(p.id) : 0 },
       active_task_count: badge(m.id),
@@ -349,7 +358,7 @@ export function createMockApi({ pair = false, batch2 = false } = {}) {
       // Pre-batch-2 server: PostgREST finds no function with this parameter.
       if (p_daily_reminder_enabled !== undefined && !batch2) fail('UNKNOWN');
       const m = me();
-      if (p_daily_reminder_enabled != null) m.daily_reminder_enabled = !!p_daily_reminder_enabled;
+      if (p_daily_reminder_enabled != null) m.daily_reminder_enabled = !!p_daily_reminder_enabled;   // null keeps
       if (p_display_name != null) {
         const n = p_display_name.trim();
         if (n.length < 1 || n.length > 6) fail('BAD_NAME');
@@ -426,6 +435,18 @@ export function createMockApi({ pair = false, batch2 = false } = {}) {
         const v = Math.min(50, Math.max(1, Math.round(value)));
         const t = task({ room_id: m.room_id, owner_id: p.id, title: `${p.display_name} 的模擬任務`, value: v, status: 'done', created_at: iso(now() - H), completed_at: iso(now()), due_at: iso(now() + H) });
         db.tasks.push(t); broadcast('tasks', t);
+        return clone(t);
+      },
+      /** Partner disputes (flag true) or clears (false) one of my done tasks; default: my latest done task. */
+      partnerDispute(taskId = null, flag = true) {
+        const m = memberOf(uid);
+        const p = m && partnerOf(m);
+        const t = taskId ? db.tasks.find((x) => x.id === taskId)
+          : db.tasks.filter((x) => x.owner_id === m?.id && x.status === 'done' && !x.deleted_at).sort((a, b) => ms(b.completed_at) - ms(a.completed_at))[0];
+        if (!p || !t || t.owner_id !== m.id || t.status !== 'done') return null;
+        t.disputed = !!flag;
+        t.disputed_at = t.disputed ? (t.disputed_at || iso(now())) : null;
+        broadcast('tasks', t);
         return clone(t);
       },
       partnerPropose() {

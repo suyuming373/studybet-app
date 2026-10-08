@@ -265,9 +265,10 @@ The `send_test_push` action only works with the function secret, so the app itse
 | `due_1h` | owner | 賭讀 ⏰ 還剩 1 小時 | 「{title}」NT$ {value}，快去完成！ |
 | `due_15m` | owner | 賭讀 🔥 只剩 15 分鐘 | 「{title}」NT$ {value} 快到期了 |
 | `partner_done` | the other person | {N} 剛完成 +{value} | 你現在落後 NT$ {gap}，輪到你了 · 你領先 NT$ {gap} · 平手 |
-| `partner_dispute` | owner | {N} 質疑了你的證明 | 「{title}」的照片需要再確認 |
+| `partner_dispute` | owner | {N} 質疑了你的證明 | 「{title}」的照片需要再確認，暫不計分 |
+| `dispute_cleared` (v1.2.0) | owner | {N} 取消質疑 | 「{title}」+{value} 已加回 · if completed before the last settlement: 「{title}」在上次結算前完成，不再計分 |
 | `overdue` | owner only | 賭讀 任務已逾期 | 「{title}」已逾期，不影響分數 |
-| `daily` | each member with ≥ 1 active task | 賭讀 📚 今天還有 {n} 件事沒做 | 最近到期：「{title}」 |
+| `daily` | each member with ≥ 1 active task and 每日提醒 on (v1.2.0) | 賭讀 📚 今天還有 {n} 件事沒做 | 最近到期：「{title}」 |
 | `settlement_request` | the other person | {N} 想結算 | 同意後總計歸零，目前 NT$ {amount} |
 | `settlement_result` (accepted) | proposer | {N} 已同意結算 | 總計已歸零，可在歷史撤銷 |
 | `settlement_result` (rejected / expired / undone) | as backend | backend text kept: 結算未成立 / 結算已撤銷 | e.g. 「Ming 拒絕了結算」 |
@@ -275,7 +276,18 @@ The `send_test_push` action only works with the function secret, so the app itse
 
 **About the backend's own texts:** the database still writes its original texts into `notification_outbox.payload`, e.g. "Ming 完成了任務". `send-push` replaces them with the table above. The table doesn't cover rejected, expired or undone settlements, so those keep the backend's wording.
 
-**Grouping:** the notification tag is `kind:task_id` (or `settlement:id`, `daily:date`). A repeat of the same thing replaces the earlier notification instead of stacking.
+**Grouping:** the notification tag is `kind:task_id` (or `settlement:id`, `daily:date`). A repeat of the same thing replaces the earlier notification instead of stacking. `dispute_cleared` reuses the dispute's tag (`partner_dispute:task_id`), so "取消質疑" replaces "質疑了你的證明" on the lock screen.
+
+### Batch 2 (v1.2.0) update
+
+After running `backend/06_dispute_and_daily.sql` (`backend/README-backend.md`, step 4b), redeploy **send-push** so the new copy is used. `tick` changed only in its shared files, but deploy both to keep them in step:
+
+```powershell
+npx supabase functions deploy send-push --no-verify-jwt
+npx supabase functions deploy tick --no-verify-jwt
+```
+
+If you deploy the functions **before** running 06, nothing breaks: the database simply never creates a `dispute_cleared` row until 06 is in place.
 
 ## 7. Admin queries
 
@@ -372,4 +384,4 @@ Run the local tests (no Supabase needed; they include encrypting a real push and
 npx -y deno test --allow-env --allow-net=127.0.0.1 --allow-read supabase/tests/push_test.ts
 ```
 
-✅ Expected: `ok | 13 passed | 0 failed`.
+✅ Expected: `ok | 14 passed | 0 failed`.

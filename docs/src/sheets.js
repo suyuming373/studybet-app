@@ -2,7 +2,7 @@
 import { h, toast, reducedMotion } from './dom.js';
 import {
   S, emit, me, partnerName, isOnline, getApi, addTask, abandonTask, deleteTask, disputeTask,
-  proposeSettlement, respondSettlement, undoSettlement, updateSettings, canUndo, hasReminderToggle,
+  proposeSettlement, respondSettlement, undoSettlement, updateSettings, canUndo, hasReminderToggle, disputesPauseMoney,
 } from './store.js';
 import { serverNow } from './clock.js';
 import { endOfDay, fmtWhen, fmtMD, fmtMMSS, toLocalInput, fromLocalInput } from './time.js';
@@ -206,6 +206,14 @@ export function openTaskDetail(t) {
   if (!mine && status === 'done') {
     const label = () => (t.disputed ? '取消質疑' : t.proof_path ? '質疑這個證明' : '質疑這個任務');
     const btn = h('button', { class: 'btn ghost block', onclick: async () => {
+      if (!t.disputed && disputesPauseMoney()) {
+        const ok = await confirmDialog({
+          title: '質疑這個任務？',
+          body: `質疑期間「${t.title}」的 NT$ ${t.value} 暫不計分，你按「取消質疑」後才會加回。`,
+          ok: '質疑', okClass: 'orange',
+        });
+        if (!ok) return;
+      }
       btn.disabled = true;
       const r = await disputeTask(t, !t.disputed);
       btn.disabled = false;
@@ -217,7 +225,8 @@ export function openTaskDetail(t) {
     actions.append(btn);
   }
 
-  const badge = h('span', { class: 'tag orange soft', hidden: !t.disputed }, mine ? '被質疑' : '你質疑了這個任務');
+  const paused = disputesPauseMoney();
+  const badge = h('span', { class: 'tag orange soft', hidden: !t.disputed }, paused ? '質疑中 · 暫不計分' : mine ? '被質疑' : '你質疑了這個任務');
   const body = h('div', null,
     h('div', { class: 'row-title', style: 'font-size:22px;white-space:normal' }, t.title),
     h('div', { class: 'row-meta', style: 'margin:6px 0 4px' }, badge,
@@ -229,7 +238,9 @@ export function openTaskDetail(t) {
       h('dt', null, '屬於'), h('dd', null, owner),
       t.completed_at && [h('dt', null, '完成於'), h('dd', null, fmtWhen(Date.parse(t.completed_at), now))]),
     proofBox,
-    mine && t.disputed && h('p', { class: 'msg info' }, `${partnerName()} 對這個任務有疑問。分數不受影響，聊聊吧！`),
+    mine && t.disputed && h('p', { class: 'msg info' }, paused
+      ? `${partnerName()} 對這個任務有疑問，NT$ ${t.value} 暫不計分。只有${partnerName()}能取消質疑，聊聊吧！`
+      : `${partnerName()} 對這個任務有疑問。分數不受影響，聊聊吧！`),
     actions);
   const sheet = openSheet('任務詳情', body, { onClose: () => clearInterval(timer) });
 }
@@ -252,7 +263,9 @@ export function openSettle() {
   box.append(h('section', null,
     h('div', { class: 'k', style: 'text-align:center;font-weight:700;color:var(--muted)' }, '目前總差距'),
     h('div', { class: `big-amount num ${n > 0 ? 'gap lead' : n < 0 ? 'gap behind' : 'gap even'}`, style: 'min-height:0;padding:0' }, n === 0 ? '平手' : payText(n)),
-    h('p', { style: 'color:var(--muted);font-weight:600' }, '現實中付完錢後，按「請求歸零」。對方同意後總差距歸零；本週分數不受影響，紀錄也不會刪除。')));
+    h('p', { style: 'color:var(--muted);font-weight:600' }, '現實中付完錢後，按「請求歸零」。對方同意後總差距歸零；本週分數不受影響，紀錄也不會刪除。'),
+    disputesPauseMoney() ? h('p', { class: 'msg info settle-dispute-note' }, '質疑中的任務不計入這次結算',
+      g.disputed_pending?.count > 0 ? `（目前 ${g.disputed_pending.count} 件）。結算時仍在質疑中的任務，之後取消質疑也不會再計入。` : '。') : ''));
 
   if (!g.partner) box.append(h('p', { class: 'msg info' }, msg('NO_PARTNER')));
   else if (ps && ps.proposed_by_me) {
@@ -347,8 +360,8 @@ export function openSettings() {
     h('label', { class: 'field' }, h('span', null, '每日提醒時間（兩人共用）'), h('div', { class: 'input-row' }, time, timeBtn),
       h('small', null, '提醒時間屬於整個房間，修改後兩支手機都會改變。台北時間。')),
     reminder && h('div', { class: 'field' },
-      h('label', { class: 'toggle-row', style: 'min-height:44px' }, h('span', null, '⏰ 每日提醒'), reminder),
-      h('small', null, '只影響你自己：關閉後你不會收到每日提醒，夥伴不受影響。')),
+      h('label', { class: 'toggle-row', style: 'min-height:44px' }, h('span', null, '每日提醒（開／關只影響你自己）'), reminder),
+      h('small', null, '關閉後你不會收到每日提醒，夥伴不受影響。提醒時間是兩人共用的，在上面設定。')),
     h('label', { class: 'toggle-row' }, h('span', null, '🔊 音效'), sound),
     h('div', { class: 'field' }, h('span', { style: 'display:block;font-weight:700;margin-bottom:6px' }, '🔔 通知'), pushBtn, pushStatus, pushExtra),
     version);

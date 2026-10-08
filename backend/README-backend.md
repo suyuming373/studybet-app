@@ -8,7 +8,9 @@ Everything the app needs on Supabase: tables, security rules, scoring, the settl
 | `02_rls_and_rpc.sql` | Security rules, scoring, all RPC functions, notification triggers, `claim_due_notifications()` | Step 4 |
 | `03_storage.sql` | Private `proofs` bucket and its access rules | Step 4 |
 | `04_cron_cleanup.sql` | Nightly purge at 03:30 Taipei, hourly settlement expiry, proof-expiry functions for Part C | Step 4 |
-| `tests.sql` | 107 automatic tests, prints PASS/FAIL | Step 5 |
+| `05_push_delivery.sql` | Delivery bookkeeping for Part C's Edge Functions (see `../README-push.md`) | Part C setup |
+| `06_dispute_and_daily.sql` | **Batch 2 (v1.2.0):** disputes pause the money; per-member daily-reminder switch | Step 4b, after 01–05 |
+| `tests.sql` | 136 automatic tests, prints PASS/FAIL (needs 01–06) | Step 5 |
 | `seed_demo.sql` | Demo room for UI work — **do not run in production** | Optional, step 8 |
 | `99_enable_notification_cron.sql` | Calls Part C's `tick` every minute | **Only after Part C is deployed**, step 9 |
 
@@ -100,11 +102,26 @@ select jobname, schedule from cron.job order by jobname;
 
 ✅ Expected: `studybet-expire-settlements | 7 * * * *` and `studybet-nightly-cleanup | 30 19 * * *`. pg_cron uses UTC: 19:30 UTC = 03:30 Taipei.
 
+### 4b. Batch 2: run `06_dispute_and_daily.sql` (app v1.2.0)
+
+Run it **once, after 01–05**, exactly like the files above (Notepad → copy → new query → **Run**). Supabase may warn about a destructive operation: the file drops the old 2-argument `update_settings` and the old check on `notification_outbox.kind`, then creates the new versions. Click **Run this query**.
+
+✅ **Success:** one row `daily_column = true | update_settings_args = 3 | dispute_cleared_kind = true`.
+
+What it changes (details in `CONTRACT.md` → ADDENDUM A8):
+- A **disputed** done task stops counting in the week net, the total net and any settlement amount until the member who disputed it clears the dispute. Then it counts again in the week of its original `completed_at`.
+- New column `members.daily_reminder_enabled` (default `true`) and a third, optional argument `update_settings(…, p_daily_reminder_enabled)`. Only `get_state().me` shows it. The partner can't read it, so `members` is now readable column by column.
+- New notification kind `dispute_cleared`. After running 06, redeploy `send-push` so the new texts are used (`../README-push.md`).
+
+> ⚠️ **If you ever re-run `02_rls_and_rpc.sql`, run `06` again right after it.** 02 brings back the old function bodies, the old 2-argument `update_settings` (two versions would make the app's settings calls fail) and the full read access to `members`. Re-running 06 on its own is always safe.
+
+The app (v1.2.0) works before and after this step. It shows the new dispute texts and the 每日提醒 switch only once `get_state()` returns `me.daily_reminder_enabled`.
+
 ## 5. Run the tests
 
 1. Open `tests.sql` in Notepad, copy everything, paste it into a **new query** and press **Run**.
 
-✅ **Success:** a table of rows marked `PASS`, and the **last row** reads `SUMMARY | 107 tests | failures: 0`.
+✅ **Success:** a table of rows marked `PASS`, and the **last row** reads `SUMMARY | 136 tests | failures: 0`. (Before 06 is run, the dispute and `b2:` rows fail. That is expected; run step 4b.)
 
 The `security:` rows check that the server-only functions are refused for signed-in users and anonymous visitors, and that `app_config` is unreadable. The authenticated user's executable functions must be exactly the contract RPCs plus 2 RLS helpers. One caveat: if you ever add your own functions to the `public` schema, the row "authenticated can execute exactly …" flags them. That is on purpose.
 
@@ -239,7 +256,8 @@ Every RPC fails with a short, stable code in `error.message` (supabase-js). Map 
 - `join_room` → `{id, slot, display_name, room_id, created_at}` (the member)
 - `create_task`, `complete_task`, `abandon_task`, `delete_task`, `dispute_task` → the task row
 - `propose_settlement`, `respond_settlement`, `undo_settlement` → the settlement row
-- `update_settings(p_display_name, p_daily_reminder_time)` → fresh `get_state()`. Either argument may be `null` to keep the current value. The time is rounded to the minute.
+- `update_settings(p_display_name, p_daily_reminder_time, p_daily_reminder_enabled)` → fresh `get_state()`. Every argument is optional and `null` keeps the current value. The time is rounded to the minute and shared by the room; `p_daily_reminder_enabled` changes only the caller's own switch (06).
+- `get_state()` (06) adds `me.daily_reminder_enabled` (never on `partner`) and `disputed_pending: {count, amount_me}`: the disputed tasks in the current total window and what would come back, from my point of view, if they were all cleared.
 - `get_state()` → `server_now, room, me, partner (null until joined), week_start, week_end, week_net_me, total_net_me, done_counts {me:{week,total}, partner:{week,total}}, streaks {me, partner}, active_task_count, pending_settlement {id, proposed_by, proposed_by_me, proposed_at, expires_at} | null, last_confirmed_settlement {id, amount_slot1_net, amount_me, confirmed_at, proposed_by, responded_by, can_undo, undo_until} | null`
   - Headline: `total_net_me > 0` → "You lead {partner} NT$ x"; `< 0` → "{partner} leads you NT$ x"; `0` → "All square".
   - Use `server_now` to correct the phone's clock when showing countdowns.
@@ -304,13 +322,15 @@ if (!error && expired.length) {
 - **Server clock only.** Deadlines, weeks and settlements all use the database clock. `complete_task` must finish strictly before `due_at`. Completing exactly at `due_at` fails.
 - **No lost or double-counted task around a settlement.** `complete_task` and `respond_settlement` lock the room row and read the clock *after* the lock. Every completed task therefore lands either in the frozen settlement amount or in the new total, never in neither. Tasks completed exactly at `confirmed_at` belong to the settled period.
 - **Week** = Monday 00:00 to next Monday 00:00 Asia/Taipei, by `completed_at`. Tested at Sunday 23:59:59.9 and Monday 00:00:00.1.
-- **Disputes** only add a badge. Disputed tasks keep counting.
+- **Disputes pause the money (06).** While a done task is disputed it counts for nobody: not in the week net, the total net, `propose_settlement`'s "nothing to settle" check or the frozen settlement amount. `done_counts` and streaks still count it. Only the member who disputed it (the non-owner) can clear it; the owner gets `NOT_ALLOWED`. Once cleared it counts again **in the window of its original `completed_at`**: a task completed this week is back in this week, one completed last week only in the total.
+  - **Edge case: disputed at settlement time.** `respond_settlement` freezes the amount without the disputed task. The task was completed before `confirmed_at`, so it is outside the new total window too. Clearing the dispute later does **not** bring it back into the total (it still returns to its week). It is excluded permanently, unless that settlement is undone, in which case it counts again as usual. The owner's `dispute_cleared` notification says so ("在上次結算前完成，不再計分") instead of "+N 已加回".
+  - `dispute_task` locks the room row like `complete_task` and `respond_settlement`, so "disputed at confirmation time" is always well defined.
 - **Settlement expiry:** a proposal pending for 7 days is rejected automatically (`responded_by` stays empty). This happens on the hourly job and on every `claim_due_notifications` run. `get_state()` already hides it before that.
 - **Reminder rules** (`claim_due_notifications`):
   - `due_1h` fires when 15–60 minutes are left; `due_15m` when ≤ 15 minutes are left.
   - **Neither fires for a task created less than 15 minutes ago.** You just set that deadline, so a reminder would be noise. Once the task is 15 minutes old it becomes eligible if it is still in a window. A task due in 30 minutes, for example, gets `due_1h` at its 15-minute mark.
   - `overdue` goes to the owner only, and only for tasks that went overdue **in the last hour**. Turning on the cron late, or after a pause, won't flood you with old ones. This rule ignores task age.
-  - `daily` fires once per member per Taipei date, in the hour after `daily_reminder_time`, if the member has ≥ 1 active, non-overdue task.
+  - `daily` fires once per member per Taipei date, in the hour after `daily_reminder_time`, if the member has ≥ 1 active, non-overdue task **and has the daily reminder switched on** (`members.daily_reminder_enabled`, 06). The time is shared by the room; the on/off switch is per member.
 - **Slot reclaim** moves the member row to the new anonymous user. Tasks, settlements and push subscriptions follow through `ON UPDATE CASCADE`. Anyone with the code can do this, which is the contract's design, so **keep the code secret**.
 - **Brute force:** 5 failed pairing attempts per 10 minutes per anonymous user. An attacker could create new anonymous users, so use a code of **12+ random characters** and turn on CAPTCHA (step 2). Codes are stored as bcrypt hashes. Clients cannot even read the hash column.
 
@@ -319,6 +339,7 @@ if (!error && expired.length) {
 No contract name or signature was changed. Every deviation is listed in the **CONTRACT ADDENDUM** at the end of `CONTRACT.md`. In short:
 
 - Internal tables `pairing_attempts` and `daily_reminder_log`, both invisible to clients.
+- Batch 2 (06): `members.daily_reminder_enabled`, `update_settings`' third argument, `get_state().disputed_pending`, notification kind `dispute_cleared` (ADDENDUM A8).
 - View `task_states`.
 - Internal helpers, not callable by clients: `week_start_for`, `week_net_slot1`, `total_net_slot1`, `settlement_boundary`, `member_streak`, `task_deadline_ok`, `call_tick`.
 - RLS helpers callable by clients: `my_room_id`, `proof_object_allowed`.
@@ -419,4 +440,4 @@ To avoid pausing: use the app at least every few days, or open the Supabase dash
 
 ## How this was tested
 
-`tests.sql` (107 tests: pairing, validation, scoring symmetry, week boundary, streaks, settlement propose/accept/reject/expire/undo, dispute, history paging, reminders incl. the 15-minute rule, slot reclaim, blocked direct writes, the security audit of server-only functions and `app_config`, proof-expiry hand-off) passed with **0 failures** on PostgreSQL 17 (PGlite), using stand-ins for Supabase's `auth.uid()`, the roles and `storage` tables. `01`–`04` and `seed_demo.sql` were also run twice in a row, with the tests passing again afterwards, to confirm they are safe to re-run without loosening any grant. The Supabase-only parts couldn't be exercised there: pg_cron, pg_net, the real Storage API and PostgREST's HTTP-400 handling. Step 5 on your project is the real confirmation, and step 9's checks cover the cron/HTTP side.
+`tests.sql` (136 tests: pairing, validation, scoring symmetry, week boundary, streaks, settlement propose/accept/reject/expire/undo, disputes pausing and restoring money (incl. week boundary, settlement while disputed, undo), per-member daily reminder, history paging, reminders incl. the 15-minute rule, slot reclaim, blocked direct writes, the security audit of server-only functions and `app_config`, proof-expiry hand-off) passed with **0 failures** on PostgreSQL 17 (PGlite), using stand-ins for Supabase's `auth.uid()`, the roles and `storage` tables. `01`–`04`, `06` and `seed_demo.sql` were also run twice in a row, with the tests passing again afterwards, to confirm they are safe to re-run without loosening any grant. The Supabase-only parts couldn't be exercised there: pg_cron, pg_net, the real Storage API and PostgREST's HTTP-400 handling. Step 5 on your project is the real confirmation, and step 9's checks cover the cron/HTTP side.

@@ -59,7 +59,15 @@ export function render(ctx: Ctx): { title: string; body: string } {
       }
       break;
     case 'partner_dispute':
-      if (t != null) out = { title: `${N} 質疑了你的證明`, body: quoted('', t, '的照片需要再確認') };
+      if (t != null) out = { title: `${N} 質疑了你的證明`, body: quoted('', t, '的照片需要再確認，暫不計分') };
+      break;
+    case 'dispute_cleared':
+      // payload.counted = false: completed before the latest settlement, so nothing comes back
+      if (t != null && v != null) {
+        out = p.counted === false
+          ? { title: `${N} 取消質疑`, body: quoted('', t, '在上次結算前完成，不再計分') }
+          : { title: `${N} 取消質疑`, body: quoted('', t, `+${v} 已加回`) };
+      }
       break;
     case 'overdue':
       if (t != null) out = { title: '賭讀 任務已逾期', body: quoted('', t, '已逾期，不影響分數') };

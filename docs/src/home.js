@@ -1,7 +1,7 @@
 // Home: headline gap, cards, streaks, tabs (Mine / Partner / History), FAB.
 import { h, svg, reconcile, toast } from './dom.js';
 import {
-  S, emit, onUpdate, partnerName, myActive, partnerActive, queuedOp, isOnline, canUndo, nameOf,
+  S, emit, onUpdate, partnerName, myActive, partnerActive, queuedOp, isOnline, canUndo, nameOf, disputesPauseMoney,
   loadMoreHistory, refreshHistory, completeTask, respondSettlement, undoSettlement,
 } from './store.js';
 import { serverNow } from './clock.js';
@@ -21,6 +21,9 @@ export function payText(amountMe) {
   if (amountMe < 0) return `你付 ${pn} NT$ ${-amountMe}`;
   return '平手，不用付錢';
 }
+
+/** Dispute badge: with backend 06 a disputed task's money is paused until the disputer clears it. */
+export const disputeTag = () => h('span', { class: 'tag orange soft' }, disputesPauseMoney() ? '質疑中 · 暫不計分' : '被質疑');
 
 const RING = '<svg class="ringsvg" viewBox="0 0 48 48" aria-hidden="true"><circle class="ring" cx="24" cy="24" r="22"/></svg>';
 const TICK = '<svg class="tick" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 12.5l5 5L20 6.5" fill="none" stroke="currentColor" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
@@ -270,7 +273,7 @@ function partnerItem(t) {
         h('div', { class: 'row-meta' },
           dueTag(t),
           t.requires_proof && h('span', { class: 'tag blue' }, '📷 需照片'),
-          t.disputed && h('span', { class: 'tag orange soft' }, '被質疑'))),
+          t.disputed && disputeTag())),
       h('div', { class: 'row-val num neg' }, `+${t.value}`)),
   };
 }
@@ -318,7 +321,7 @@ function histTask(it) {
   const who = it.mine ? '你' : partnerName();
   return {
     key: `t:${it.id}`,
-    sig: [it.status, it.title, it.value, it.disputed, it.proof_path, it.proof_expired, it._queued, who].join('|'),
+    sig: [it.status, it.title, it.value, it.disputed, it.proof_path, it.proof_expired, it._queued, who, disputesPauseMoney()].join('|'),
     render: () => h('div', { class: 'row' },
       h('div', { class: `hist-ico ${cls}` }, ico),
       h('button', { class: 'row-main', onclick: () => openTaskDetail(it) },
@@ -326,9 +329,9 @@ function histTask(it) {
         h('div', { class: 'row-meta' },
           h('span', null, `${who} · ${word} · ${fmtHM(at)}`),
           it.proof_path && h('span', { class: 'tag blue' }, it.proof_expired ? '照片已過期' : '📷 照片'),
-          it.disputed && h('span', { class: 'tag orange soft' }, '被質疑'),
+          it.disputed && disputeTag(),
           it._queued && h('span', { class: 'tag' }, '等待連線'))),
-      h('div', { class: `row-val num ${it.status !== 'done' ? 'muted' : it.mine ? '' : 'neg'}` }, `+${it.value}`)),
+      h('div', { class: `row-val num ${it.status !== 'done' ? 'muted' : it.disputed && disputesPauseMoney() ? 'muted paused' : it.mine ? '' : 'neg'}` }, `+${it.value}`)),
   };
 }
 

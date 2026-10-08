@@ -409,8 +409,10 @@ export async function undoSettlement(id) {
   await refreshState();
   refreshHistorySoon();
 }
-/** Batch 2 backend adds members.daily_reminder_enabled; until it's deployed get_state() has no such field. */
+/** Batch 2 backend (06) adds members.daily_reminder_enabled; until it's deployed get_state() has no such field. */
 export const hasReminderToggle = () => me()?.daily_reminder_enabled !== undefined;
+/** Same backend version: a disputed task's money is paused until the disputer clears it. */
+export const disputesPauseMoney = hasReminderToggle;
 
 export async function updateSettings(name, time, reminderEnabled) {
   needsOnline();
@@ -559,7 +561,13 @@ function onRealtime(table, p) {
     }
     if (n.status !== 'active' || n.deleted_at) {
       const h = S.history.items.find((x) => x.type === 'task' && x.id === n.id);
-      if (h) h.disputed = n.disputed;
+      // Realtime's "old" row carries only the id under RLS, so compare with what history last showed.
+      if (h && h.disputed && !n.disputed && n.owner_id === myId) {
+        const lc = S.gs?.last_confirmed_settlement;
+        const counted = !lc || Date.parse(n.completed_at) > Date.parse(lc.confirmed_at);   // before the last settlement: stays out
+        notice(`undispute:${n.id}:${h.disputed_at || ''}`, { kind: 'undispute', title: n.title, value: n.value, counted, key: `dispute_cleared|partner_dispute:${n.id}` });
+      }
+      if (h) { h.disputed = n.disputed; h.disputed_at = n.disputed_at; }
     }
   } else if (table === 'settlements' && n) {
     if (n.status === 'pending' && n.proposed_by !== myId) notice(`s:${n.id}:p`, { kind: 's-request', key: `settlement_request|settlement:${n.id}` });
@@ -583,7 +591,11 @@ function flushNotices() {
       const n = g.total_net_me;
       const tail = n < 0 ? `你落後 NT$ ${-n}` : n > 0 ? `你還領先 NT$ ${n}` : '現在平手';
       toastOnce(it.key, `${pn} 剛完成 +${it.value} — ${tail}`, { kind: n < 0 ? 'warn' : '' });
-    } else if (it.kind === 'dispute') toastOnce(it.key, `${pn} 質疑了「${it.title}」`, { kind: 'warn' });
+    } else if (it.kind === 'dispute') toastOnce(it.key, `${pn} 質疑了「${it.title}」${disputesPauseMoney() ? '，暫不計分' : ''}`, { kind: 'warn' });
+    else if (it.kind === 'undispute') {
+      const tail = !disputesPauseMoney() ? '' : it.counted ? `，+${it.value} 已加回` : '（上次結算前完成，不再計分）';
+      toastOnce(it.key, `${pn} 取消質疑「${it.title}」${tail}`, { kind: 'good' });
+    }
     else if (it.kind === 's-request') toastOnce(it.key, `${pn} 想把總差距歸零，到首頁回應吧`);
     else if (it.kind === 's-ok') toastOnce(it.key, '已結清！總差距歸零 🎉', { kind: 'good' });
     else if (it.kind === 's-no') toastOnce(it.key, `${pn} 暫時不想結算`);

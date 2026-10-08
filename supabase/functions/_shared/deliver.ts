@@ -113,7 +113,7 @@ export const webPushSender: Sender = async (sub, payload, ttl, urgency) => {
 // ---------------------------------------------------------------- delivery
 const TTL: Record<string, number> = {
   due_15m: 15 * 60, due_1h: 45 * 60, overdue: 6 * 3600, daily: 3 * 3600,
-  partner_done: 24 * 3600, partner_dispute: 24 * 3600, settlement_request: 24 * 3600, settlement_result: 24 * 3600, test: 600,
+  partner_done: 24 * 3600, partner_dispute: 24 * 3600, dispute_cleared: 24 * 3600, settlement_request: 24 * 3600, settlement_result: 24 * 3600, test: 600,
 };
 const URGENT = new Set(['due_15m', 'due_1h', 'overdue']);
 const GONE = new Set([404, 410]);

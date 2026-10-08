@@ -2,7 +2,7 @@
 // Boot order: config check → install gate → cached paint → session → live data.
 //   ?mock=1  in-memory backend + test hooks on window.__studybet (no Supabase needed)
 //   ?mock=1&pair=1  same, starting at the pairing screen
-//   ?mock=1&batch2=1  same, with the batch 2 backend fields (每日提醒 toggle in 設定)
+//   ?mock=1&batch2=1  same, behaving like the backend with 06 applied (disputes pause money, 每日提醒 switch)
 //   ?dev=1   real backend without the "add to Home Screen" gate (desktop preview)
 //   ?debug=1 push diagnostics page (also: tap the version in Settings 5 times)
 import { h, toast } from './src/dom.js';
@@ -205,6 +205,8 @@ function exposeTestHooks(api) {
     // extras for the settlement flow
     simulatePartnerProposeSettlement() { return hk.partnerPropose(); },
     simulatePartnerRespond(accept = true) { return hk.partnerRespond(accept); },
+    /** Partner disputes / clears one of MY done tasks (default: the latest). With &batch2=1 its money pauses. */
+    simulatePartnerDispute(taskId = null, on = true) { return hk.partnerDispute(taskId, on); },
   };
   console.info('[studybet] mock mode — try window.__studybet.simulatePartnerComplete(20)');
 }

@@ -2,7 +2,7 @@
 // Bump CACHE_VERSION (and APP_VERSION in src/version.js) on every release.
 importScripts('./sw-push.js');
 
-const CACHE_VERSION = 'v1.1.1';
+const CACHE_VERSION = 'v1.2.0';
 const SHELL = `studybet-shell-${CACHE_VERSION}`;
 const CDN = `studybet-cdn-${CACHE_VERSION}`;
 
