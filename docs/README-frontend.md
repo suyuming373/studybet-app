@@ -9,7 +9,7 @@ A static PWA made of plain HTML, CSS and ES modules. There is no build step. It 
 | `src/*.js` | Modules: `store` (data, offline queue, Realtime), `home`, `sheets`, `pairing`, `fx` (sound/haptics/confetti), `mock` (`?mock=1` fake backend), … |
 | `manifest.webmanifest`, `icons/` | Install metadata and icons (`icon.svg` is the source for the PNGs) |
 | `sw.js` | Service worker: precaches the app and supabase-js, stale-while-revalidate |
-| `push.js`, `onboarding.js`, `sw-push.js` | **Stubs, replaced by Part C** |
+| `push.js`, `onboarding.js`, `sw-push.js` | Web Push, app badge, install guide (Part C, see `../README-push.md`) |
 
 ---
 
@@ -72,7 +72,7 @@ Open `docs/config.js` in Notepad (right-click → **Open with** → **Notepad**)
 |---|---|
 | `SUPABASE_URL` | Supabase → **Project Settings** (gear) → **Data API** → **Project URL**, e.g. `https://abcdefghijkl.supabase.co` |
 | `SUPABASE_ANON_KEY` | Supabase → **Project Settings** → **API Keys** → the **anon / public** key (or the **publishable** key) |
-| `VAPID_PUBLIC_KEY` | Produced by Part C. Leave empty for now. |
+| `VAPID_PUBLIC_KEY` | The **Public Key** from `npx web-push generate-vapid-keys` (README-push.md step 5/11). Empty = notifications stay off. |
 | `TURNSTILE_SITE_KEY` | Optional. Only if you turned on CAPTCHA in Supabase → **Authentication** (Cloudflare Turnstile). Empty = no CAPTCHA widget. |
 
 These values are safe to publish. **Never** put the `service_role` key here.
@@ -104,7 +104,7 @@ Save the file (`Ctrl` + `S`). If `SUPABASE_URL` or `SUPABASE_ANON_KEY` is missin
 
 ### 3d. Releasing an update
 1. Change files and save.
-2. Bump the version in **both** `docs/sw.js` (`CACHE_VERSION = 'v1.0.1'`) and `docs/src/version.js` (`APP_VERSION = '1.0.1'`).
+2. Bump the version in **both** `docs/sw.js` (e.g. `CACHE_VERSION = 'v1.1.1'`) and `docs/src/version.js` (`APP_VERSION = '1.1.1'`).
 3. GitHub Desktop → **Commit to main** → **Push origin**.
 4. Phones pick it up on the next launch and show "新版本已就緒 / 重新整理".
 
@@ -129,7 +129,14 @@ If you only changed `config.js`, there's no need to bump the version: the servic
 
 ## 5. Notes for Part C and maintainers
 
-- **Interfaces kept by the stubs**: `push.js` exports `enablePush()` (called synchronously inside the Settings tap), `getPushStatus()` (string or Promise: `granted | denied | default | unsupported | unavailable`) and `syncBadge(n)` (called after every `get_state()` with `active_task_count`). `onboarding.js` exports `showOnboarding()`. Before calling it, app.js puts a minimal install hint into `#app`. Part C should render its onboarding into `#app`, replacing that hint. `sw-push.js` is loaded by `sw.js` through `importScripts`.
+- **Push, onboarding and badge (Part C, implemented).** `push.js` exports `enablePush()`, `getPushStatus()` and `syncBadge(n)`:
+  - `enablePush()` is called directly inside a tap; `Notification.requestPermission()` is its first await.
+  - `getPushStatus()` returns `'unsupported' | 'needs-install' | 'default' | 'denied' | 'subscribed'`.
+  - `syncBadge(n)` runs after every `get_state()` and on `visibilitychange`.
+  - Extras: `initPush()`, `repairPush()` (silent re-subscribe on each app open) and `debugInfo()`.
+- **Onboarding:** `onboarding.js` `showOnboarding()` renders the 5-step guide into `#app`, replacing the install hint. `showPermissionStep()` runs after pairing; `deniedGuide()` is used in Settings.
+- **Service worker:** `sw-push.js` holds the push and notification-click handlers. `SUPPRESS_WHEN_FOCUSED` sits at the top.
+- **Setup:** see `../README-push.md`. Diagnostics: `?debug=1`, or tap the version in Settings 5 times.
 - **Pairing**: `BAD_CODE` means "wrong code **or** room full" (CONTRACT A1). After a `BAD_CODE` on Join, the app explains both cases and opens the **我回來了** slot picker. The picker is also always reachable under the Join form.
 - **Daily reminder time** is a room setting (`rooms.daily_reminder_time`), so Settings labels it 兩人共用 (shared by both people).
 - **supabase-js** is pinned to `2.117.3` (jsDelivr `+esm`). The 9 module URLs it pulls in are listed in `sw.js` → `CDN_FILES`. When you upgrade, change both `src/api-supabase.js` and that list.

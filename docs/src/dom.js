@@ -76,3 +76,15 @@ export function toast(text, opts = {}) {
   toastBox.append(el);
   setTimeout(close, opts.ms || (opts.action ? 6000 : 3800));
 }
+
+// The same event can arrive twice in the foreground (Realtime and a push the
+// service worker handed to the page). Whichever comes first shows; the other is dropped.
+const recent = new Map();
+export function toastOnce(key, text, opts) {
+  const now = Date.now();
+  for (const [k, t] of recent) if (now - t > 60000) recent.delete(k);
+  if (key && recent.has(key)) return false;
+  if (key) recent.set(key, now);
+  toast(text, opts);
+  return true;
+}

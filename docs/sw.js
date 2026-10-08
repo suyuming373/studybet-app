@@ -2,7 +2,7 @@
 // Bump CACHE_VERSION (and APP_VERSION in src/version.js) on every release.
 importScripts('./sw-push.js');
 
-const CACHE_VERSION = 'v1.0.0';
+const CACHE_VERSION = 'v1.1.0';
 const SHELL = `studybet-shell-${CACHE_VERSION}`;
 const CDN = `studybet-cdn-${CACHE_VERSION}`;
 
@@ -18,6 +18,7 @@ const SHELL_FILES = [
   './sw-push.js',
   './src/api-supabase.js',
   './src/clock.js',
+  './src/debug.js',
   './src/dom.js',
   './src/errors.js',
   './src/fx.js',
@@ -33,6 +34,7 @@ const SHELL_FILES = [
   './icons/apple-touch-icon.png',
   './icons/icon-192.png',
   './icons/icon-512.png',
+  './icons/badge-96.png',
 ];
 
 // supabase-js 2.117.3 (jsDelivr ESM build) and every module it imports, all version-pinned.

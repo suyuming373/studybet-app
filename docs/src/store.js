@@ -3,7 +3,7 @@ import { serverNow, localNow, syncServer, clockOffset, setOffset } from './clock
 import { idbGet, idbSet } from './idb.js';
 import { AppError, toAppError, msg } from './errors.js';
 import { setTz } from './time.js';
-import { toast } from './dom.js';
+import { toast, toastOnce } from './dom.js';
 import { syncBadge } from '../push.js';
 
 const PAGE = 30;
@@ -22,6 +22,7 @@ export const S = {
   rt: 'connecting',         // 'connecting' | 'ok' | 'down'
   lastUpdated: null,        // ms (phone clock) of the last successful get_state()
   tab: 'mine',
+  pushOff: false,           // notifications were on but could not be repaired (banner)
 };
 
 let api = null;
@@ -70,6 +71,7 @@ export function init(apiImpl) {
   addEventListener('offline', () => { S.online = false; emit(); });
   document.addEventListener('visibilitychange', () => {
     if (document.visibilityState !== 'visible' || !S.gs) return;
+    try { syncBadge(S.gs.active_task_count); } catch {}
     refreshAll().catch(() => {});
     if (S.rt !== 'ok') restartRealtime();
   });
@@ -544,20 +546,20 @@ function onRealtime(table, p) {
     if (tmp) { delete S.saving[tmp._key]; n._key = tmp._key; }
     upsertTask(n);
     if (n.owner_id !== myId && n.status === 'done' && !n.deleted_at && fresh(n.completed_at)) {
-      notice(`done:${n.id}`, { kind: 'done', value: n.value, title: n.title });
+      notice(`done:${n.id}`, { kind: 'done', value: n.value, title: n.title, key: `partner_done|partner_done:${n.id}` });
     }
     if (n.owner_id === myId && n.disputed && fresh(n.disputed_at)) {
-      notice(`dispute:${n.id}:${n.disputed_at}`, { kind: 'dispute', title: n.title });
+      notice(`dispute:${n.id}:${n.disputed_at}`, { kind: 'dispute', title: n.title, key: `partner_dispute|partner_dispute:${n.id}` });
     }
     if (n.status !== 'active' || n.deleted_at) {
       const h = S.history.items.find((x) => x.type === 'task' && x.id === n.id);
       if (h) h.disputed = n.disputed;
     }
   } else if (table === 'settlements' && n) {
-    if (n.status === 'pending' && n.proposed_by !== myId) notice(`s:${n.id}:p`, { kind: 's-request' });
-    if (n.status === 'confirmed' && n.proposed_by === myId) notice(`s:${n.id}:c`, { kind: 's-ok' });
-    if (n.status === 'rejected' && n.responded_by && n.responded_by !== myId) notice(`s:${n.id}:r`, { kind: 's-no' });
-    if (n.status === 'undone') notice(`s:${n.id}:u`, { kind: 's-undo' });
+    if (n.status === 'pending' && n.proposed_by !== myId) notice(`s:${n.id}:p`, { kind: 's-request', key: `settlement_request|settlement:${n.id}` });
+    if (n.status === 'confirmed' && n.proposed_by === myId) notice(`s:${n.id}:c`, { kind: 's-ok', key: `settlement_result|settlement:${n.id}` });
+    if (n.status === 'rejected' && n.responded_by && n.responded_by !== myId) notice(`s:${n.id}:r`, { kind: 's-no', key: `settlement_result|settlement:${n.id}` });
+    if (n.status === 'undone') notice(`s:${n.id}:u`, { kind: 's-undo', key: `settlement_result|settlement:${n.id}` });
   } else if (table === 'members') {
     refreshTasks().catch(() => {});
   }
@@ -574,11 +576,11 @@ function flushNotices() {
     if (it.kind === 'done') {
       const n = g.total_net_me;
       const tail = n < 0 ? `你落後 NT$ ${-n}` : n > 0 ? `你還領先 NT$ ${n}` : '現在平手';
-      toast(`${pn} 剛完成 +${it.value} — ${tail}`, { kind: n < 0 ? 'warn' : '' });
-    } else if (it.kind === 'dispute') toast(`${pn} 質疑了「${it.title}」`, { kind: 'warn' });
-    else if (it.kind === 's-request') toast(`${pn} 想把總差距歸零，到首頁回應吧`);
-    else if (it.kind === 's-ok') toast('已結清！總差距歸零 🎉', { kind: 'good' });
-    else if (it.kind === 's-no') toast(`${pn} 暫時不想結算`);
-    else if (it.kind === 's-undo') toast('上一次結清已撤銷');
+      toastOnce(it.key, `${pn} 剛完成 +${it.value} — ${tail}`, { kind: n < 0 ? 'warn' : '' });
+    } else if (it.kind === 'dispute') toastOnce(it.key, `${pn} 質疑了「${it.title}」`, { kind: 'warn' });
+    else if (it.kind === 's-request') toastOnce(it.key, `${pn} 想把總差距歸零，到首頁回應吧`);
+    else if (it.kind === 's-ok') toastOnce(it.key, '已結清！總差距歸零 🎉', { kind: 'good' });
+    else if (it.kind === 's-no') toastOnce(it.key, `${pn} 暫時不想結算`);
+    else if (it.kind === 's-undo') toastOnce(it.key, '上一次結清已撤銷');
   }
 }

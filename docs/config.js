@@ -16,7 +16,7 @@ window.STUDYBET_CONFIG = {
 
   // Produced by Part C (push notifications). Leave empty until then;
   // the app works without it, only notifications stay off.
-  VAPID_PUBLIC_KEY: '',
+  VAPID_PUBLIC_KEY: 'BMiE97j8xkGkGRaDSuq17zQn6Vx3cz_x-JzlrcSSmAOmSIaoFyVIYBnG1n5n7TauEtuF4ycLqWlR2XZBYlpr32U',
 
   // Optional. Cloudflare Turnstile site key (free). Only fill this in if you
   // turned on CAPTCHA protection in Supabase → Authentication. Empty = no

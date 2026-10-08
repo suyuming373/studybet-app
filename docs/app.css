@@ -371,3 +371,31 @@ button { cursor: pointer; }
   .tag.pulse { animation: none !important; }
   .btn:active:not(:disabled), .fab:active { transform: none; }
 }
+
+/* ---------- onboarding (Part C) ---------- */
+.ob .ob-track {
+  display: flex; overflow-x: auto; scroll-snap-type: x mandatory; scrollbar-width: none;
+  margin: 12px -20px 0; -webkit-overflow-scrolling: touch; overscroll-behavior-x: contain;
+}
+.ob .ob-track::-webkit-scrollbar { display: none; }
+.ob-slide { flex: 0 0 100%; scroll-snap-align: center; padding: 4px 20px; }
+.ob-card {
+  background: var(--surface); border: 2px solid var(--line); border-bottom-width: 4px; border-radius: var(--r);
+  padding: 16px; text-align: center;
+}
+.ob-card svg { width: min(200px, 60vw); height: auto; display: block; margin: 4px auto 8px; }
+.ob-card h2 { font-size: 20px; margin: 4px 0; }
+.ob-cap { margin: 0; color: var(--muted); font-weight: 600; }
+.ob-step { font-size: 13px; font-weight: 800; color: var(--blue); }
+.ob-key .ob-card { border-color: var(--orange); }
+.ob-dots { display: flex; justify-content: center; gap: 8px; margin: 12px 0; }
+.ob-dots span { width: 8px; height: 8px; border-radius: 4px; background: var(--line); transition: width .2s, background .2s; }
+.ob-dots span.on { width: 22px; background: var(--green); }
+.ob-nav { margin-top: 4px; }
+.denied-guide svg { width: 100%; max-width: 260px; height: auto; display: block; margin: 6px auto 0; }
+
+/* ---------- debug page ---------- */
+.dbg dl { display: grid; grid-template-columns: auto 1fr; gap: 6px 12px; font-size: 14px; }
+.dbg dt { color: var(--muted); font-weight: 700; }
+.dbg dd { margin: 0; font-weight: 700; word-break: break-all; font-variant-numeric: tabular-nums; }
+.dbg pre { background: var(--surface); border-radius: 12px; padding: 10px; font-size: 12px; overflow-x: auto; white-space: pre-wrap; word-break: break-all; -webkit-user-select: text; user-select: text; }

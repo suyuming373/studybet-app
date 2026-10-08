@@ -9,7 +9,7 @@ import { dueLabel, fmtDayHeader, fmtMD, fmtHM, dayKey } from './time.js';
 import * as fx from './fx.js';
 import { compressImage, fakePhoto } from './image.js';
 import { errText, msg } from './errors.js';
-import { openAddTask, openTaskDetail, openSettle, openMenu, openQueue, confirmDialog } from './sheets.js';
+import { openAddTask, openTaskDetail, openSettle, openMenu, openQueue, openSettings, confirmDialog } from './sheets.js';
 
 const MINUS = '−';
 export const signed = (n) => (n > 0 ? `+${n}` : n < 0 ? `${MINUS}${-n}` : '0');
@@ -94,6 +94,10 @@ function renderTop() {
   // bars: offline + queue
   const bars = [];
   if (!isOnline()) bars.push(h('div', { class: 'bar orange' }, `離線中 — 最後更新 ${S.lastUpdated ? fmtHM(S.lastUpdated) : '—'}`));
+  if (S.pushOff) {
+    bars.push(h('div', { class: 'bar orange' }, '🔕 通知已關閉',
+      h('button', { class: 'link', onclick: openSettings }, '修復')));
+  }
   if (S.queue.length) {
     bars.push(h('div', { class: 'bar' }, `📤 ${S.queue.length} 項變更${isOnline() ? '送出中…' : '等待連線'}`,
       h('button', { class: 'link', onclick: openQueue }, '查看')));

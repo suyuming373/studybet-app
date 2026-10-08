@@ -10,6 +10,7 @@ import { errText, msg } from './errors.js';
 import * as fx from './fx.js';
 import { APP_VERSION } from './version.js';
 import { enablePush, getPushStatus } from '../push.js';
+import { deniedGuide } from '../onboarding.js';
 import { onCheck, payText, showTab } from './home.js';
 
 const MIN = 6e4, DAY = 864e5;
@@ -300,27 +301,45 @@ export function openSettings() {
   const sound = h('input', { type: 'checkbox', class: 'switch', checked: fx.soundOn(), 'aria-label': '音效',
     onchange: () => { fx.setSound(sound.checked); if (sound.checked) fx.playComplete(); } });
 
+  // Notifications: 'unsupported' | 'needs-install' | 'default' | 'denied' | 'subscribed'
   const pushStatus = h('small', null, '');
-  const showPush = () => Promise.resolve().then(() => getPushStatus()).then((s) => {
-    const txt = { granted: '通知已開啟', enabled: '通知已開啟', denied: '通知被拒絕：請到 iPhone 設定 › 通知 › 賭讀 開啟', default: '尚未開啟', unsupported: '這台裝置目前不支援通知（需 iOS 16.4+ 並加到主畫面）', unavailable: '通知功能即將推出' };
-    pushStatus.textContent = txt[s] || (s ? String(s) : '');
-  }, () => { pushStatus.textContent = ''; });
-  const pushBtn = h('button', { class: 'btn blue block', onclick: () => {
+  const pushExtra = h('div');
+  const pushBtn = h('button', { class: 'btn blue block', hidden: true, onclick: () => {
     // enablePush() must start inside this tap (iOS permission prompt rule): no await before it.
-    let p;
-    try { p = enablePush(); } catch (e) { toast(errText(e), { kind: 'warn' }); return; }
-    Promise.resolve(p).then(showPush, (e) => toast(errText(e), { kind: 'warn' }));
+    pushBtn.disabled = true;
+    Promise.resolve(enablePush()).then((s) => {
+      pushBtn.disabled = false;
+      if (s === 'subscribed') toast('通知已開啟 🔔', { kind: 'good' });
+      showPush();
+    }, (e) => { pushBtn.disabled = false; toast(errText(e), { kind: 'warn' }); });
   } }, '🔔 開啟通知');
+  const PUSH_TEXT = {
+    subscribed: '✅ 通知已開啟',
+    default: '尚未開啟。開啟後會提醒截止時間，並通知對方的進度。',
+    denied: '',
+    'needs-install': '請從主畫面的「賭讀」圖示打開，才能開啟通知（Safari 分頁裡不行）。',
+    unsupported: '這台裝置目前無法收通知：需要 iOS 16.4 以上、從主畫面開啟，且管理員已設定推播金鑰。',
+  };
+  const showPush = () => Promise.resolve().then(() => getPushStatus()).then((s) => {
+    pushStatus.textContent = PUSH_TEXT[s] ?? '';
+    pushBtn.hidden = s !== 'default';
+    pushExtra.replaceChildren(s === 'denied' ? deniedGuide() : '');
+    if (S.pushOff && s === 'subscribed') pushExtra.replaceChildren(h('p', { class: 'msg warn' }, '通知已關閉：訂閱失效且自動修復失敗。請關掉 App 再打開；若仍如此，到 ?debug=1 按「重新訂閱」。'));
+  }, () => { pushStatus.textContent = ''; });
   showPush();
+
+  let taps = 0;
+  const version = h('p', { style: 'color:var(--muted);font-size:13px;text-align:center;margin-top:20px', onclick: () => {
+    if (++taps >= 5) location.href = './?debug=1';   // hidden shortcut to the push diagnostics page
+  } }, `賭讀 StudyBet v${APP_VERSION}${getApi()?.mode === 'mock' ? '（mock 模式）' : ''}`);
 
   const body = h('div', null,
     h('label', { class: 'field' }, h('span', null, '你的名字（1–6 字）'), h('div', { class: 'input-row' }, name, nameBtn)),
     h('label', { class: 'field' }, h('span', null, '每日提醒時間（兩人共用）'), h('div', { class: 'input-row' }, time, timeBtn),
       h('small', null, '提醒時間屬於整個房間，修改後兩支手機都會改變。台北時間。')),
     h('label', { class: 'toggle-row' }, h('span', null, '🔊 音效'), sound),
-    h('div', { class: 'field' }, pushBtn, pushStatus),
-    h('p', { style: 'color:var(--muted);font-size:13px;text-align:center;margin-top:20px' },
-      `賭讀 StudyBet v${APP_VERSION}${getApi()?.mode === 'mock' ? '（mock 模式）' : ''}`));
+    h('div', { class: 'field' }, h('span', { style: 'display:block;font-weight:700;margin-bottom:6px' }, '🔔 通知'), pushBtn, pushStatus, pushExtra),
+    version);
   openSheet('設定', body);
 }
 

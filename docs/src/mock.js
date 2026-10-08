@@ -390,6 +390,8 @@ export function createMockApi({ pair = false } = {}) {
       if (!b) fail('PERMISSION');
       return URL.createObjectURL(b);
     },
+    async pushRows() { await net(); return []; },
+    async memberId() { return uid; },
     openChannel(roomId, onChange, onStatus) {
       const ch = { roomId, onChange, onStatus, alive: true };
       setTimeout(() => {

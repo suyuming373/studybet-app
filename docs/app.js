@@ -3,6 +3,7 @@
 //   ?mock=1  in-memory backend + test hooks on window.__studybet (no Supabase needed)
 //   ?mock=1&pair=1  same, starting at the pairing screen
 //   ?dev=1   real backend without the "add to Home Screen" gate (desktop preview)
+//   ?debug=1 push diagnostics page (also: tap the version in Settings 5 times)
 import { h, toast } from './src/dom.js';
 import { openDb, idbClear } from './src/idb.js';
 import * as store from './src/store.js';
@@ -11,11 +12,13 @@ import { toAppError, errText } from './src/errors.js';
 import { installAudioUnlock } from './src/fx.js';
 import { setSkew, advanceVirtual, serverNow } from './src/clock.js';
 import { endOfDay } from './src/time.js';
+import { initPush, repairPush } from './push.js';
 
 const root = document.getElementById('app');
 const params = new URLSearchParams(location.search);
 const MOCK = params.has('mock');
 const DEV = params.has('dev');
+const DEBUG = params.has('debug');
 let booted = false;
 let homeMounted = false;
 
@@ -95,7 +98,14 @@ async function goPairing(api, cfg) {
   homeMounted = false;
   await store.clearLocal();
   const { showPairing } = await import('./src/pairing.js');
-  await showPairing(root, { api, cfg, mock: MOCK, onPaired: () => startLive(api, cfg) });
+  await showPairing(root, {
+    api, cfg, mock: MOCK,
+    onPaired: async () => {
+      // Installed app: ask for notifications right after pairing (skipped unless still undecided).
+      const { showPermissionStep } = await import('./onboarding.js');
+      await showPermissionStep(root, { onDone: () => startLive(api, cfg) });
+    },
+  });
 }
 
 async function startLive(api, cfg) {
@@ -111,13 +121,25 @@ async function startLive(api, cfg) {
   await mountHome();
   store.startRealtime();
   store.flush();
+  repairPush();   // silent: re-subscribe if the subscription is missing, changed or disabled (410)
+}
+
+async function showDebugPage(api, cfg) {
+  const { showDebug } = await import('./src/debug.js');
+  await showDebug(root, {
+    onClose: () => {
+      try { history.replaceState(null, '', location.pathname); } catch {}
+      homeMounted = false;
+      startLive(api, cfg).catch(crash);
+    },
+  });
 }
 
 async function boot() {
   const cfg = window.STUDYBET_CONFIG || {};
   registerSW();
   if (!MOCK && (!cfg.SUPABASE_URL || !cfg.SUPABASE_ANON_KEY)) { showSetup(cfg); booted = true; return; }
-  if (!MOCK && !DEV && !isStandalone()) { await showInstallGate(); booted = true; return; }
+  if (!MOCK && !DEV && !DEBUG && !isStandalone()) { await showInstallGate(); booted = true; return; }
 
   installAudioUnlock();
   openDb(MOCK ? 'studybet-mock' : 'studybet');
@@ -138,12 +160,22 @@ async function boot() {
     catch (e) { if (cached) { booted = true; S.netDown = true; store.emit(); return; } throw e; }
   }
   store.init(api);
+  initPush({ openUrl: openFromNotification });
   booted = true;
 
   let session = false;
   try { session = await api.hasSession(); } catch {}
   if (!session) { await goPairing(api, cfg); return; }
+  if (DEBUG) { await store.refreshState().catch(() => {}); await showDebugPage(api, cfg); return; }
   await startLive(api, cfg);
+}
+
+/** A notification was tapped while the app was already open. */
+async function openFromNotification(url) {
+  if (!homeMounted) return;
+  const { showTab } = await import('./src/home.js');
+  showTab(String(url).includes('#history') ? 'history' : 'mine');
+  store.refreshAll().catch(() => {});
 }
 
 function exposeTestHooks(api) {

@@ -7,6 +7,7 @@
 //   activeTasks() → task rows    (status 'active', deleted_at is null)
 //   upload(path, blob)           signedUrl(path) → url (60 s)
 //   openChannel(roomId, onChange(table, payload), onStatus(status)) → close()
+//   pushRows(endpoint) → own push_subscriptions rows   memberId() → auth user id
 
 // Keep in sync with CDN_FILES in ../sw.js (precached for offline use).
 export const SUPABASE_JS = 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.117.3/+esm';
@@ -50,6 +51,16 @@ export async function createApi(cfg) {
       const { data, error } = await sb.storage.from('proofs').createSignedUrl(path, 60);
       if (error) fail(error);
       return data.signedUrl;
+    },
+    /** Own push_subscriptions rows for an endpoint (RLS: member_id = auth.uid()). */
+    async pushRows(endpoint) {
+      const { data, error } = await sb.from('push_subscriptions').select('member_id, endpoint, disabled_at, last_success_at').eq('endpoint', endpoint);
+      if (error) fail(error);
+      return data || [];
+    },
+    async memberId() {
+      const { data } = await sb.auth.getSession();
+      return data.session?.user?.id || null;
     },
     openChannel(roomId, onChange, onStatus) {
       const ch = sb.channel(`room-${roomId}-${Date.now()}`);
