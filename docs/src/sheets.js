@@ -2,7 +2,7 @@
 import { h, toast, reducedMotion } from './dom.js';
 import {
   S, emit, me, partnerName, isOnline, getApi, addTask, abandonTask, deleteTask, disputeTask,
-  proposeSettlement, respondSettlement, undoSettlement, updateSettings, canUndo,
+  proposeSettlement, respondSettlement, undoSettlement, updateSettings, canUndo, hasReminderToggle,
 } from './store.js';
 import { serverNow } from './clock.js';
 import { endOfDay, fmtWhen, fmtMD, fmtMMSS, toLocalInput, fromLocalInput } from './time.js';
@@ -298,6 +298,15 @@ export function openSettings() {
     save(nameBtn, v, null, '名字已更新');
   } }, '儲存');
   const timeBtn = h('button', { class: 'btn small', onclick: () => save(timeBtn, null, time.value || '21:00', '提醒時間已更新') }, '儲存');
+  // 每日提醒 on/off: hidden until the batch 2 backend exposes me.daily_reminder_enabled.
+  const reminder = hasReminderToggle() && h('input', { type: 'checkbox', class: 'switch', checked: g.me.daily_reminder_enabled !== false, 'aria-label': '每日提醒',
+    onchange: async () => {
+      const on = reminder.checked;
+      reminder.disabled = true;
+      try { await updateSettings(null, null, on); toast(on ? '每日提醒已開啟' : '每日提醒已關閉', { kind: 'good' }); }
+      catch (e) { reminder.checked = !on; toast(errText(e), { kind: 'warn' }); }
+      reminder.disabled = false;
+    } });
   const sound = h('input', { type: 'checkbox', class: 'switch', checked: fx.soundOn(), 'aria-label': '音效',
     onchange: () => { fx.setSound(sound.checked); if (sound.checked) fx.playComplete(); } });
 
@@ -337,6 +346,9 @@ export function openSettings() {
     h('label', { class: 'field' }, h('span', null, '你的名字（1–6 字）'), h('div', { class: 'input-row' }, name, nameBtn)),
     h('label', { class: 'field' }, h('span', null, '每日提醒時間（兩人共用）'), h('div', { class: 'input-row' }, time, timeBtn),
       h('small', null, '提醒時間屬於整個房間，修改後兩支手機都會改變。台北時間。')),
+    reminder && h('div', { class: 'field' },
+      h('label', { class: 'toggle-row', style: 'min-height:44px' }, h('span', null, '⏰ 每日提醒'), reminder),
+      h('small', null, '只影響你自己：關閉後你不會收到每日提醒，夥伴不受影響。')),
     h('label', { class: 'toggle-row' }, h('span', null, '🔊 音效'), sound),
     h('div', { class: 'field' }, h('span', { style: 'display:block;font-weight:700;margin-bottom:6px' }, '🔔 通知'), pushBtn, pushStatus, pushExtra),
     version);
@@ -363,7 +375,7 @@ export function openMenu(anchor) {
   const menu = h('div', { class: 'menu', role: 'menu' },
     item('🤝 結算', openSettle),
     item('⚙️ 設定', openSettings),
-    S.queue.length && item(`📤 等待中的變更（${S.queue.length}）`, openQueue));
+    S.queue.length > 0 && item(`📤 等待中的變更（${S.queue.length}）`, openQueue));
   back.addEventListener('click', close);
   document.body.append(back, menu);
   anchor?.blur?.();

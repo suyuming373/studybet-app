@@ -41,6 +41,7 @@ Useful variants:
 |---|---|
 | `/?mock=1` | Full app with a fake in-memory backend ("Me" and "Ming", 5 tasks, 1 settlement). Reload = fresh start. |
 | `/?mock=1&pair=1` | Same, starting at the pairing screen. Join code: `studybet-demo` (the room is full, so tap 我回來了 and pick slot 1). |
+| `/?mock=1&batch2=1` | Same, but the fake backend also has the batch 2 field `me.daily_reminder_enabled`, so 設定 shows the **每日提醒** on/off switch. Without `batch2=1` the switch stays hidden and the mock rejects `p_daily_reminder_enabled`, like the deployed backend. |
 | `/?dev=1` | The **real** Supabase backend without the "add to Home Screen" gate (needs `config.js`). |
 
 ### Test hooks (`?mock=1` only)
@@ -116,7 +117,7 @@ If you only changed `config.js`, there's no need to bump the version: the servic
 
 - [ ] **Add a task in ≤ 5 s**: tap ＋, type a title, tap 新增. The sheet closes and the row slides in.
 - [ ] **Complete with animation + sound + haptic**: tap the round button. It squishes, "+NT$ 20" floats up, confetti plays, two rising tones sound, the phone ticks (iOS 17.4+), and the headline number counts to its new value.
-- [ ] **Complete with proof < 150 KB**: on a 📷 task, take a photo. In Supabase → Storage → `proofs` the file is ≤ 150 KB.
+- [ ] **Complete with proof < 150 KB**: on a 📷 task, iOS offers 拍照 / 相簿 / 選擇檔案. Try both a new photo and one from 相簿 (HEIC). In Supabase → Storage → `proofs` each file is a JPEG ≤ 150 KB.
 - [ ] **Deadline passing moves a row to History** while the app stays open (try a task due in 6 minutes).
 - [ ] **Offline open shows cached data**: open once online, turn on Airplane mode, reopen. The orange "離線中 — 最後更新 hh:mm" bar appears and the data is there.
 - [ ] **Offline completion past the deadline is rejected after reconnect**: in Airplane mode complete a task due in ~6 min, wait until it is past due, turn Airplane mode off. You get "太晚了——伺服器時間顯示期限已經過了".

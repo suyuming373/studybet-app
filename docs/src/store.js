@@ -409,10 +409,16 @@ export async function undoSettlement(id) {
   await refreshState();
   refreshHistorySoon();
 }
-export async function updateSettings(name, time) {
+/** Batch 2 backend adds members.daily_reminder_enabled; until it's deployed get_state() has no such field. */
+export const hasReminderToggle = () => me()?.daily_reminder_enabled !== undefined;
+
+export async function updateSettings(name, time, reminderEnabled) {
   needsOnline();
   const t0 = localNow();
-  const gs = await call(() => api.rpc('update_settings', { p_display_name: name ?? null, p_daily_reminder_time: time ?? null }));
+  const args = { p_display_name: name ?? null, p_daily_reminder_time: time ?? null };
+  // Only send the new parameter when the server knows it, otherwise the RPC signature doesn't match.
+  if (reminderEnabled != null && hasReminderToggle()) args.p_daily_reminder_enabled = !!reminderEnabled;
+  const gs = await call(() => api.rpc('update_settings', args));
   applyState(gs, t0, localNow());
 }
 

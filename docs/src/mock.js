@@ -17,7 +17,7 @@ const clone = (x) => (x == null ? x : JSON.parse(JSON.stringify(x)));
 const sleep = (t) => new Promise((r) => setTimeout(r, t));
 const fail = (code) => { throw new AppError(code); };
 
-export function createMockApi({ pair = false } = {}) {
+export function createMockApi({ pair = false, batch2 = false } = {}) {
   const now = () => mockServerNow();
   const T = now();
 
@@ -34,6 +34,7 @@ export function createMockApi({ pair = false } = {}) {
     settlements: [],
     storage: new Map(),
     failures: [],
+    settingsCalls: [],   // every update_settings args object, for tests
   };
   let uid = pair ? null : ME;   // the anonymous user of this "phone"
   let offline = false;
@@ -75,7 +76,14 @@ export function createMockApi({ pair = false } = {}) {
   function me() { if (!uid) fail('NOT_AUTHENTICATED'); return memberOf(uid) || fail('NOT_IN_ROOM'); }
   const roomOf = (id) => db.rooms.find((r) => r.id === id);
   const partnerOf = (m) => db.members.find((x) => x.room_id === m.room_id && x.id !== m.id) || null;
-  const memberJson = (m) => (m ? clone(m) : null);
+  // ?batch2=1: members.daily_reminder_enabled exists (default on). Without it the field is absent, like the deployed backend.
+  const memberJson = (m) => {
+    if (!m) return null;
+    const j = clone(m);
+    if (batch2) j.daily_reminder_enabled = m.daily_reminder_enabled ?? true;
+    else delete j.daily_reminder_enabled;
+    return j;
+  };
   const roomJson = (r) => ({ id: r.id, timezone: r.timezone, daily_reminder_time: r.daily_reminder_time, created_at: r.created_at });
   const roomTasks = (rid) => db.tasks.filter((t) => t.room_id === rid && !t.deleted_at);
   const slotOf = (id) => memberOf(id)?.slot;
@@ -335,8 +343,13 @@ export function createMockApi({ pair = false } = {}) {
       broadcast('settlements', s);
       return clone(s);
     },
-    update_settings({ p_display_name = null, p_daily_reminder_time = null }) {
+    update_settings(args) {
+      const { p_display_name = null, p_daily_reminder_time = null, p_daily_reminder_enabled } = args;
+      db.settingsCalls.push(clone(args));
+      // Pre-batch-2 server: PostgREST finds no function with this parameter.
+      if (p_daily_reminder_enabled !== undefined && !batch2) fail('UNKNOWN');
       const m = me();
+      if (p_daily_reminder_enabled != null) m.daily_reminder_enabled = !!p_daily_reminder_enabled;
       if (p_display_name != null) {
         const n = p_display_name.trim();
         if (n.length < 1 || n.length > 6) fail('BAD_NAME');

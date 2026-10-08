@@ -37,7 +37,7 @@ export async function showDebug(root, { onClose }) {
         h('dt', null, '徽章數字'), h('dd', null, Number.isFinite(d.badge) ? String(d.badge) : '—'),
         h('dt', null, '離線佇列'), h('dd', null, String(d.queue)),
         h('dt', null, '會員 ID'), h('dd', null, d.memberId || '—')),
-      d.pushOff && h('p', { class: 'msg warn' }, '通知已關閉：自動修復失敗。按「重新訂閱」。'),
+      d.pushOff ? h('p', { class: 'msg warn' }, '通知已關閉：自動修復失敗。按「重新訂閱」。') : '',   // replaceChildren would print false
       h('div', { class: 'row-btns', style: 'margin-top:12px' },
         h('button', { class: 'btn blue small', onclick: () => {
           // Inside the tap: asks for permission first if needed.

@@ -17,8 +17,12 @@ function loadImage(file) {
 }
 const toBlob = (c, q) => new Promise((res) => c.toBlob(res, 'image/jpeg', q));
 
+// HEIC from the Files app can arrive with an empty or generic MIME type.
+const IMAGE_EXT = /\.(jpe?g|png|heic|heif|webp|gif)$/i;
+
+/** Any picked image (camera, 相簿, Files; JPEG/PNG/HEIC) → always re-encoded through a canvas to JPEG. */
 export async function compressImage(file) {
-  if (!file || (file.type && !file.type.startsWith('image/'))) throw new AppError('IMAGE_BAD');
+  if (!file || (file.type && !file.type.startsWith('image/') && !IMAGE_EXT.test(file.name || ''))) throw new AppError('IMAGE_BAD');
   const img = await loadImage(file);
   const w0 = img.naturalWidth, h0 = img.naturalHeight;
   if (!w0 || !h0) throw new AppError('IMAGE_BAD');

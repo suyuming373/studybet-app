@@ -131,9 +131,10 @@ function renderTop() {
   const sSig = st ? `${st.me}|${st.partner}|${pn}|${!!g.partner}` : '';
   if (el.streaks.dataset.sig !== sSig) {
     el.streaks.dataset.sig = sSig;
-    el.streaks.replaceChildren(
+    // replaceChildren (unlike h) prints null/false/0 as text, so drop falsy entries first.
+    el.streaks.replaceChildren(...[
       st && h('span', { class: 'streak me' }, `🔥 ${st.me} 天`),
-      st && g.partner && h('span', { class: 'streak partner' }, `${pn} 🔥 ${st.partner}`));
+      st && g.partner && h('span', { class: 'streak partner' }, `${pn} 🔥 ${st.partner}`)].filter(Boolean));
   }
 
   // settlement request card
@@ -154,10 +155,19 @@ function renderTop() {
   }
 
   // tabs
-  el.tabs.mine.textContent = `我的 ${g ? myActive().length : ''}`.trim();
-  el.tabs.partner.textContent = `${pn} 的`;
-  el.tabs.history.textContent = '紀錄';
+  setTabLabel(el.tabs.mine, '我的', g ? myActive().length : 0);
+  setTabLabel(el.tabs.partner, `${pn}的`, 0);
+  setTabLabel(el.tabs.history, '紀錄', 0);
   for (const [id, b] of Object.entries(el.tabs)) b.setAttribute('aria-selected', String(S.tab === id));
+}
+
+/** Tab text plus a count badge that only exists when count > 0 (never a bare "0"). */
+function setTabLabel(btn, text, count) {
+  const sig = `${text}|${count}`;
+  if (btn.dataset.sig === sig) return;
+  btn.dataset.sig = sig;
+  btn.replaceChildren(h('span', { class: 'tab-text' }, text));
+  if (count > 0) btn.append(h('span', { class: 'tab-badge num', 'aria-label': `${count} 項` }, String(count)));
 }
 
 async function answer(id, accept) {
@@ -363,7 +373,8 @@ export function onCheck(t, btn) {
 let picker = null;
 function pickPhoto(t) {
   picker?.remove();
-  const input = h('input', { type: 'file', accept: 'image/*', capture: 'environment', class: 'visually-hidden', 'aria-hidden': 'true' });
+  // No `capture`: iOS then offers 拍照 / 相簿 / 選擇檔案. compressImage re-encodes anything (HEIC, PNG…) to JPEG.
+  const input = h('input', { type: 'file', accept: 'image/*,.heic,.heif', class: 'visually-hidden', 'aria-hidden': 'true' });
   picker = input;
   input.addEventListener('change', async () => {
     const f = input.files && input.files[0];

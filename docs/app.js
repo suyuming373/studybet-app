@@ -2,6 +2,7 @@
 // Boot order: config check → install gate → cached paint → session → live data.
 //   ?mock=1  in-memory backend + test hooks on window.__studybet (no Supabase needed)
 //   ?mock=1&pair=1  same, starting at the pairing screen
+//   ?mock=1&batch2=1  same, with the batch 2 backend fields (每日提醒 toggle in 設定)
 //   ?dev=1   real backend without the "add to Home Screen" gate (desktop preview)
 //   ?debug=1 push diagnostics page (also: tap the version in Settings 5 times)
 import { h, toast } from './src/dom.js';
@@ -152,7 +153,7 @@ async function boot() {
   let api;
   if (MOCK) {
     const { createMockApi } = await import('./src/mock.js');
-    api = createMockApi({ pair: params.has('pair') });
+    api = createMockApi({ pair: params.has('pair'), batch2: params.has('batch2') });
     exposeTestHooks(api);
   } else {
     const { createApi } = await import('./src/api-supabase.js');

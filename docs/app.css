@@ -158,13 +158,13 @@ button { cursor: pointer; }
 
 /* ---------- headline gap ---------- */
 .gap { text-align: center; padding: 14px 16px 6px; min-height: 124px; }
-.gap-label { font-size: 17px; font-weight: 800; min-height: 24px; }
-.gap-num { font-size: 56px; font-weight: 800; line-height: 1.1; letter-spacing: -.01em; min-height: 62px; }
+.gap-label { font-size: 17px; font-weight: 800; min-height: 24px; overflow-wrap: anywhere; text-wrap: balance; }
+.gap-num { font-size: min(56px, 15vw); font-weight: 800; line-height: 1.1; letter-spacing: -.01em; min-height: 62px; white-space: nowrap; }
 .gap-num .cur { font-size: 26px; margin-right: 4px; vertical-align: 12px; }
 .gap.lead { color: var(--green); }
 .gap.behind { color: var(--orange); }
 .gap.even { color: var(--gray); }
-.gap .gap-sub { font-size: 13px; color: var(--muted); font-weight: 700; min-height: 18px; }
+.gap .gap-sub { font-size: 13px; color: var(--muted); font-weight: 700; min-height: 18px; overflow-wrap: anywhere; }
 
 /* ---------- cards ---------- */
 .cards { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; padding: 8px 16px; }
@@ -200,8 +200,15 @@ button { cursor: pointer; }
 .tabs button {
   min-height: 48px; border: 0; background: none; font-weight: 800; color: var(--gray); font-size: 15px;
   border-bottom: 3px solid transparent; margin-bottom: -2px;
-  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; padding: 0 4px;
+  display: flex; align-items: center; justify-content: center; gap: 4px; min-width: 0; padding: 0 4px;
 }
+.tabs .tab-text { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.tab-badge {
+  flex: none; min-width: 20px; height: 20px; padding: 0 6px; border-radius: 10px;
+  display: inline-grid; place-items: center; font-size: 12px; line-height: 1;
+  background: var(--surface); color: var(--muted);
+}
+.tabs button[aria-selected="true"] .tab-badge { background: var(--blue-soft); color: var(--blue); }
 .tabs button[aria-selected="true"] { color: var(--blue); border-bottom-color: var(--blue); }
 .list { padding: 8px 16px; min-height: 240px; }
 .empty { text-align: center; color: var(--muted); padding: 36px 12px; font-weight: 700; }
