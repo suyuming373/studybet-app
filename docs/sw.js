@@ -2,7 +2,7 @@
 // Bump CACHE_VERSION (and APP_VERSION in src/version.js) on every release.
 importScripts('./sw-push.js');
 
-const CACHE_VERSION = 'v1.2.0';
+const CACHE_VERSION = 'v1.2.1';
 const SHELL = `studybet-shell-${CACHE_VERSION}`;
 const CDN = `studybet-cdn-${CACHE_VERSION}`;
 
@@ -30,6 +30,7 @@ const SHELL_FILES = [
   './src/store.js',
   './src/time.js',
   './src/version.js',
+  './src/viewer.js',
   './icons/icon.svg',
   './icons/apple-touch-icon.png',
   './icons/icon-192.png',
@@ -106,7 +107,7 @@ self.addEventListener('fetch', (event) => {
   if (req.method !== 'GET') return;
   const url = new URL(req.url);
   if (url.origin === 'https://cdn.jsdelivr.net') { event.respondWith(cacheFirst(req)); return; }
-  if (url.origin !== self.location.origin) return;            // Supabase, Turnstile: straight to network
+  if (url.origin !== self.location.origin) return;            // Supabase (incl. signed proof URLs, never cached), Turnstile: straight to network
   if (req.mode === 'navigate') { event.respondWith(staleWhileRevalidate(event, req, './index.html')); return; }
   if (url.pathname.endsWith('/config.js')) { event.respondWith(networkFirst(req)); return; }
   event.respondWith(staleWhileRevalidate(event, req));

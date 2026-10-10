@@ -12,6 +12,7 @@ import { APP_VERSION } from './version.js';
 import { enablePush, getPushStatus } from '../push.js';
 import { deniedGuide } from '../onboarding.js';
 import { onCheck, payText, showTab } from './home.js';
+import { openProofViewer, closeProofViewer } from './viewer.js';
 
 const MIN = 6e4, DAY = 864e5;
 let current = null;
@@ -47,15 +48,17 @@ export const closeSheet = () => current?.close();
 
 export function confirmDialog({ title, body, ok = '確定', cancel = '取消', okClass = '' }) {
   return new Promise((resolve) => {
+    const prev = document.activeElement;
     const back = h('div', { class: 'backdrop dialog-back' });
-    const done = (v) => { back.remove(); box.remove(); resolve(v); };
+    const done = (v) => { back.remove(); box.remove(); if (prev?.isConnected) prev.focus?.({ preventScroll: true }); resolve(v); };
+    const no = h('button', { class: 'btn ghost', onclick: () => done(false) }, cancel);
     const box = h('div', { class: 'dialog', role: 'alertdialog', 'aria-modal': 'true' },
       h('h2', null, title), h('p', null, body),
-      h('div', { class: 'row-btns' },
-        h('button', { class: 'btn ghost', onclick: () => done(false) }, cancel),
+      h('div', { class: 'row-btns' }, no,
         h('button', { class: `btn ${okClass}`, onclick: () => done(true) }, ok)));
     back.addEventListener('click', () => done(false));
     document.body.append(back, box);
+    no.focus({ preventScroll: true });
   });
 }
 
@@ -149,18 +152,25 @@ export function openTaskDetail(t) {
   const owner = mine ? '你' : partnerName();
   let timer = null;
 
-  const proofBox = t.proof_path
-    ? h('div', { class: 'proof-box' }, t.proof_expired ? '照片已超過 30 天，已自動刪除' : '載入照片中…')
-    : null;
-  if (proofBox && !t.proof_expired) {
+  // Proof thumbnail: tap → full-screen viewer (which fetches its own fresh signed URL).
+  const canDispute = !mine && status === 'done';
+  const badgeText = () => (!t.disputed ? '' : disputesPauseMoney() ? '質疑中 · 暫不計分' : mine ? '被質疑' : '你質疑了這個任務');
+  let proofBox = null;
+  if (t.proof_path && t.proof_expired) proofBox = h('div', { class: 'proof-box expired' }, '照片已超過 30 天，已清除');
+  else if (t.proof_path) {
+    proofBox = h('button', { class: 'proof-box', type: 'button', 'aria-label': '放大查看證明照片', onclick: () => openProofViewer(t, {
+      badge: badgeText,
+      dispute: canDispute ? { label: () => (t.disputed ? '取消質疑' : '質疑這張證明'), run: runDispute } : null,
+      returnFocus: proofBox,
+    }) }, '載入照片中…');
     if (!isOnline()) proofBox.textContent = '離線中，連線後才能看照片';
     else {
       getApi().signedUrl(t.proof_path).then((url) => {
         const img = h('img', { alt: `「${t.title}」的證明照片`, decoding: 'async' });
-        img.onload = () => proofBox.replaceChildren(img);
-        img.onerror = () => { proofBox.textContent = '照片載入失敗'; };
+        img.onload = () => proofBox.replaceChildren(img, h('span', { class: 'proof-zoom', 'aria-hidden': 'true' }, '⤢'));
+        img.onerror = () => { proofBox.textContent = '照片載入失敗，請重試'; };
         img.src = url;
-      }, (e) => { proofBox.textContent = errText(e); });
+      }, () => { proofBox.textContent = '照片載入失敗，請重試'; });
     }
   }
 
@@ -203,30 +213,36 @@ export function openTaskDetail(t) {
       actions.append(delBtn);
     }
   }
-  if (!mine && status === 'done') {
-    const label = () => (t.disputed ? '取消質疑' : t.proof_path ? '質疑這個證明' : '質疑這個任務');
-    const btn = h('button', { class: 'btn ghost block', onclick: async () => {
-      if (!t.disputed && disputesPauseMoney()) {
-        const ok = await confirmDialog({
-          title: '質疑這個任務？',
-          body: `質疑期間「${t.title}」的 NT$ ${t.value} 暫不計分，你按「取消質疑」後才會加回。`,
-          ok: '質疑', okClass: 'orange',
-        });
-        if (!ok) return;
-      }
-      btn.disabled = true;
-      const r = await disputeTask(t, !t.disputed);
-      btn.disabled = false;
-      if (!r.ok) { toast(errText(r.error), { kind: 'warn' }); return; }
-      btn.textContent = label();
-      badge.hidden = !t.disputed;
-      if (r.queued) toast('離線中：連線後會送出');
-    } }, label());
-    actions.append(btn);
+  // Shared by the sheet button and the viewer's button; both redraw from t.disputed afterwards.
+  let disputeBtn = null;
+  const label = () => (t.disputed ? '取消質疑' : t.proof_path ? '質疑這個證明' : '質疑這個任務');
+  const syncDispute = () => {
+    if (disputeBtn) disputeBtn.textContent = label();
+    badge.textContent = badgeText(); badge.hidden = !t.disputed;
+  };
+  async function runDispute() {
+    if (!t.disputed && disputesPauseMoney()) {
+      const ok = await confirmDialog({
+        title: '質疑這個任務？',
+        body: `質疑期間「${t.title}」的 NT$ ${t.value} 暫不計分，你按「取消質疑」後才會加回。`,
+        ok: '質疑', okClass: 'orange',
+      });
+      if (!ok) return;
+    }
+    if (disputeBtn) disputeBtn.disabled = true;
+    const r = await disputeTask(t, !t.disputed);
+    if (disputeBtn) disputeBtn.disabled = false;
+    if (!r.ok) { toast(errText(r.error), { kind: 'warn' }); return; }
+    syncDispute();
+    if (r.queued) toast('離線中：連線後會送出');
+  }
+  if (canDispute) {
+    disputeBtn = h('button', { class: 'btn ghost block', onclick: runDispute }, label());
+    actions.append(disputeBtn);
   }
 
   const paused = disputesPauseMoney();
-  const badge = h('span', { class: 'tag orange soft', hidden: !t.disputed }, paused ? '質疑中 · 暫不計分' : mine ? '被質疑' : '你質疑了這個任務');
+  const badge = h('span', { class: 'tag orange soft', hidden: !t.disputed }, badgeText());
   const body = h('div', null,
     h('div', { class: 'row-title', style: 'font-size:22px;white-space:normal' }, t.title),
     h('div', { class: 'row-meta', style: 'margin:6px 0 4px' }, badge,
@@ -242,7 +258,7 @@ export function openTaskDetail(t) {
       ? `${partnerName()} 對這個任務有疑問，NT$ ${t.value} 暫不計分。只有${partnerName()}能取消質疑，聊聊吧！`
       : `${partnerName()} 對這個任務有疑問。分數不受影響，聊聊吧！`),
     actions);
-  const sheet = openSheet('任務詳情', body, { onClose: () => clearInterval(timer) });
+  const sheet = openSheet('任務詳情', body, { onClose: () => { clearInterval(timer); closeProofViewer(); } });
 }
 
 // ---------- settle up ----------

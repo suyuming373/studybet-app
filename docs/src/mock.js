@@ -35,7 +35,9 @@ export function createMockApi({ pair = false, batch2 = false } = {}) {
     storage: new Map(),
     failures: [],
     settingsCalls: [],   // every update_settings args object, for tests
+    signedUrlCalls: [],  // every signedUrl(path), for tests
   };
+  let expireNextUrls = 0;
   let uid = pair ? null : ME;   // the anonymous user of this "phone"
   let offline = false;
 
@@ -407,10 +409,15 @@ export function createMockApi({ pair = false, batch2 = false } = {}) {
     },
     async signedUrl(path) {
       await net();
+      db.signedUrlCalls.push(path);
       let b = db.storage.get(path);
       if (!b && seededProofs.has(path)) { b = await fakePhoto(); db.storage.set(path, b); }
       if (!b) fail('PERMISSION');
-      return URL.createObjectURL(b);
+      const url = URL.createObjectURL(b);
+      // Like a real signed URL it stops working after 60 s; expireNextUrls hands out an already dead one.
+      if (expireNextUrls > 0) { expireNextUrls--; URL.revokeObjectURL(url); }
+      else setTimeout(() => URL.revokeObjectURL(url), 60000);
+      return url;
     },
     async pushRows() { await net(); return []; },
     async memberId() { return uid; },
@@ -446,6 +453,17 @@ export function createMockApi({ pair = false, batch2 = false } = {}) {
         if (!p || !t || t.owner_id !== m.id || t.status !== 'done') return null;
         t.disputed = !!flag;
         t.disputed_at = t.disputed ? (t.disputed_at || iso(now())) : null;
+        broadcast('tasks', t);
+        return clone(t);
+      },
+      /** The next n signed URLs are already expired (the image fails to load until 重新載入). */
+      expireSignedUrls(n = 1) { expireNextUrls = Math.max(0, n | 0); },
+      /** Nightly cleanup ran for this task: the photo is gone and proof_expired is set. */
+      expireProof(taskId) {
+        const t = db.tasks.find((x) => x.id === taskId && x.proof_path);
+        if (!t) return null;
+        db.storage.delete(t.proof_path); seededProofs.delete(t.proof_path);
+        t.proof_expired = true;
         broadcast('tasks', t);
         return clone(t);
       },

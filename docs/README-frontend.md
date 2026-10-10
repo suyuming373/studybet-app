@@ -6,7 +6,7 @@ A static PWA made of plain HTML, CSS and ES modules. There is no build step. It 
 |---|---|
 | `index.html`, `app.css`, `app.js` | App shell, styles, entry point (boot, error boundary, test hooks) |
 | `config.js` | **Your** Supabase values (empty placeholders until you fill them in) |
-| `src/*.js` | Modules: `store` (data, offline queue, Realtime), `home`, `sheets`, `pairing`, `fx` (sound/haptics/confetti), `mock` (`?mock=1` fake backend), … |
+| `src/*.js` | Modules: `store` (data, offline queue, Realtime), `home`, `sheets`, `viewer` (full-screen proof photo), `pairing`, `fx` (sound/haptics/confetti), `mock` (`?mock=1` fake backend), … |
 | `manifest.webmanifest`, `icons/` | Install metadata and icons (`icon.svg` is the source for the PNGs) |
 | `sw.js` | Service worker: precaches the app and supabase-js, stale-while-revalidate |
 | `push.js`, `onboarding.js`, `sw-push.js` | Web Push, app badge, install guide (Part C, see `../README-push.md`) |
@@ -62,6 +62,8 @@ __studybet.simulatePartnerProposeSettlement()   // extra: shows the Agree / Not 
 __studybet.simulatePartnerRespond(true)          // extra: partner accepts your request
 __studybet.simulatePartnerDispute()              // Ming disputes your latest done task (with &batch2=1 its money pauses)
 __studybet.simulatePartnerDispute(id, false)     // …and clears it again: toast "Ming 取消質疑「…」，+N 已加回"
+__studybet.simulateExpiredPhotoUrl()             // next proof photo link is already expired → 照片載入失敗，請重試 / 重新載入
+__studybet.simulateProofExpired(id)              // 30-day cleanup ran: detail shows 照片已超過 30 天，已清除
 ```
 
 > **Seeing old files after an edit?** The service worker serves the cached copy first and updates in the background. Reload twice, or in DevTools → **Application** → **Service workers** tick **Update on reload**.
@@ -128,6 +130,7 @@ If you only changed `config.js`, there's no need to bump the version: the servic
 - [ ] **320 px width has no horizontal scroll**: Chrome DevTools, width 320, `?mock=1`.
 - [ ] **Lighthouse PWA installable**: Chrome DevTools → **Lighthouse** → check the installability items against the GitHub Pages URL.
 - [ ] **Partner's change within 2 s**: with two phones, complete on one. The other shows a toast and the new gap.
+- [ ] **Proof photo viewer (v1.2.1)**: in a task's 任務詳情 tap the photo. It opens full screen; pinch to zoom (up to 4x), double-tap toggles 1x/2x, drag to move when zoomed. The page behind does not scroll or zoom. Swipe down, tap beside the photo or ✕ to close. On the partner's photo, 質疑這張證明 is at the bottom.
 - [ ] **Dispute pauses the money (v1.2.0, after 06)**: dispute the partner's done task → confirm dialog → both headlines change by its value, badge "質疑中 · 暫不計分". Only the disputer has **取消質疑**; tapping it brings the money back.
 
 ---
@@ -146,5 +149,6 @@ If you only changed `config.js`, there's no need to bump the version: the servic
 - **Daily reminder time** is a room setting (`rooms.daily_reminder_time`), so Settings labels it 兩人共用 (shared by both people). The **on/off switch** is per person (`members.daily_reminder_enabled`, backend 06): "每日提醒（開／關只影響你自己）".
 - **Batch 2 detection (v1.2.0):** `store.js` `hasReminderToggle()` / `disputesPauseMoney()` are true when `get_state().me.daily_reminder_enabled` is defined, i.e. `backend/06_dispute_and_daily.sql` has been run. Until then the app keeps the old behavior and texts (dispute = badge "被質疑" only, no switch, no settlement note), so this frontend can be published before or after running 06.
 - **Disputes (after 06):** a disputed task counts for nobody until the member who disputed it taps **取消質疑**. A task still disputed when a settlement is confirmed stays out of the total even after it is cleared (it still counts in its week); the Settlement sheet says "質疑中的任務不計入這次結算". See `CONTRACT.md` → A8.
+- **Proof viewer (v1.2.1):** `src/viewer.js` `openProofViewer(task, { badge, dispute })`. Every open and every **重新載入** asks for a new 60 s signed URL (`createSignedUrl`). Signed URLs live only in the `<img>`: they are never written to IndexedDB, and the service worker never touches Supabase requests. If a link has expired the image fails to load and the viewer offers 重新載入. The dispute button inside the viewer runs the same code as the one in the sheet (same confirmation dialog), and both update together.
 - **supabase-js** is pinned to `2.117.3` (jsDelivr `+esm`). The 9 module URLs it pulls in are listed in `sw.js` → `CDN_FILES`. When you upgrade, change both `src/api-supabase.js` and that list.
 - **Size**: about 125 KB of own code uncompressed, about 39 KB gzipped as GitHub Pages serves it (excluding supabase-js; `mock.js` loads only with `?mock=1`).

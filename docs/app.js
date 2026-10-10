@@ -207,6 +207,10 @@ function exposeTestHooks(api) {
     simulatePartnerRespond(accept = true) { return hk.partnerRespond(accept); },
     /** Partner disputes / clears one of MY done tasks (default: the latest). With &batch2=1 its money pauses. */
     simulatePartnerDispute(taskId = null, on = true) { return hk.partnerDispute(taskId, on); },
+    /** The next n proof photo links are already expired: the viewer shows 照片載入失敗 until 重新載入. */
+    simulateExpiredPhotoUrl(n = 1) { hk.expireSignedUrls(n); },
+    /** The 30-day cleanup removed this task's photo (proof_expired = true). */
+    simulateProofExpired(taskId) { const t = hk.expireProof(taskId); store.refreshAll().catch(() => {}); return t; },
   };
   console.info('[studybet] mock mode — try window.__studybet.simulatePartnerComplete(20)');
 }
